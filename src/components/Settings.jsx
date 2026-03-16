@@ -1,15 +1,101 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { imageService } from '../services/api'
+
+const API_URL = import.meta.env.VITE_BACKEND_URL
 
 const Settings = () => {
     const [activeTab, setActiveTab] = useState('Practice Information')
+    const [images, setImages] = useState([])
+    const [isUploading, setIsUploading] = useState(false)
+    const [uploadLabel, setUploadLabel] = useState('')
+    const [editingImageId, setEditingImageId] = useState(null)
+    const [editLabel, setEditLabel] = useState('')
+    const [previewImage, setPreviewImage] = useState(null)
+    const fileInputRef = useRef(null)
 
     const tabs = [
         'Practice Information',
         'Session Recording',
         'AI Integration',
         'Privacy & Security',
-        'Notifications'
+        'Notifications',
+        'Image Library'
     ]
+
+    useEffect(() => {
+        if (activeTab === 'Image Library') {
+            fetchImages()
+        }
+    }, [activeTab])
+
+    const fetchImages = async () => {
+        try {
+            const response = await imageService.getAll()
+            setImages(response.data)
+        } catch (error) {
+            console.error('Error fetching images:', error)
+        }
+    }
+
+    const handleImageUpload = async (e) => {
+        const file = e.target.files[0]
+        if (!file) return
+
+        setIsUploading(true)
+        try {
+            const formData = new FormData()
+            formData.append('image', file)
+            if (uploadLabel.trim()) {
+                formData.append('label', uploadLabel.trim())
+            }
+
+            await imageService.upload(formData)
+            setUploadLabel('')
+            if (fileInputRef.current) fileInputRef.current.value = ''
+            await fetchImages()
+        } catch (error) {
+            console.error('Error uploading image:', error)
+            alert('Failed to upload image: ' + (error.response?.data?.message || error.message))
+        } finally {
+            setIsUploading(false)
+        }
+    }
+
+    const handleDeleteImage = async (id) => {
+        if (!window.confirm('Are you sure you want to delete this image? It will be removed from all notes that use it.')) return
+
+        try {
+            await imageService.delete(id)
+            setImages(images.filter(img => img.id !== id))
+            if (previewImage?.id === id) setPreviewImage(null)
+        } catch (error) {
+            console.error('Error deleting image:', error)
+            alert('Failed to delete image.')
+        }
+    }
+
+    const handleUpdateLabel = async (id) => {
+        try {
+            await imageService.update(id, { label: editLabel })
+            setImages(images.map(img => img.id === id ? { ...img, label: editLabel } : img))
+            setEditingImageId(null)
+            setEditLabel('')
+        } catch (error) {
+            console.error('Error updating label:', error)
+        }
+    }
+
+    const formatFileSize = (bytes) => {
+        if (bytes < 1024) return bytes + ' B'
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+    }
+
+    const getImageUrl = (imageUrl) => {
+        if (!imageUrl) return ''
+        const baseUrl = API_URL.replace('/api', '')
+        return `${baseUrl}${imageUrl}`
+    }
 
     const renderTabContent = () => {
         switch (activeTab) {
@@ -253,6 +339,164 @@ const Settings = () => {
                         </div>
                     </div>
                 )
+            case 'Image Library':
+                return (
+                    <div className="space-y-6">
+                        <div className="flex flex-col">
+                            <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                Image Library
+                            </h3>
+                            <p className="text-slate-500 text-sm mt-1">Upload and manage images that can be inserted into your session notes</p>
+                        </div>
+
+                        {/* Upload Section */}
+                        <div className="p-6 bg-primary-50 border border-primary-100 rounded-xl space-y-4">
+                            <h4 className="font-bold text-slate-800">Upload New Image</h4>
+                            <div className="flex flex-col md:flex-row gap-4">
+                                <div className="flex-1 space-y-2">
+                                    <label className="text-sm font-semibold text-slate-700">Label (optional)</label>
+                                    <input
+                                        type="text"
+                                        value={uploadLabel}
+                                        onChange={(e) => setUploadLabel(e.target.value)}
+                                        placeholder="e.g. Patient drawing, Assessment chart..."
+                                        className="w-full p-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all bg-white"
+                                    />
+                                </div>
+                                <div className="flex items-end">
+                                    <label className={`px-6 py-3 rounded-xl text-sm font-bold shadow-lg transition-all flex items-center gap-2 cursor-pointer ${isUploading ? 'bg-slate-400 cursor-not-allowed' : 'bg-primary-600 text-white hover:bg-primary-700 shadow-primary-500/30'}`}>
+                                        {isUploading ? (
+                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                        ) : (
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                            </svg>
+                                        )}
+                                        <span>{isUploading ? 'Uploading...' : 'Choose Image'}</span>
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,image/bmp"
+                                            onChange={handleImageUpload}
+                                            disabled={isUploading}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                </div>
+                            </div>
+                            <p className="text-xs text-slate-500">Supported formats: JPEG, PNG, GIF, WebP, SVG, BMP. Max size: 10MB</p>
+                        </div>
+
+                        {/* Image Grid */}
+                        {images.length > 0 ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {images.map((image) => (
+                                    <div key={image.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:shadow-lg transition-shadow group">
+                                        <div
+                                            className="relative aspect-video bg-slate-100 cursor-pointer"
+                                            onClick={() => setPreviewImage(image)}
+                                        >
+                                            <img
+                                                src={getImageUrl(image.image_url)}
+                                                alt={image.label || image.original_name}
+                                                className="w-full h-full object-cover"
+                                            />
+                                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                                                <svg className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                                                </svg>
+                                            </div>
+                                        </div>
+                                        <div className="p-4">
+                                            {editingImageId === image.id ? (
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <input
+                                                        type="text"
+                                                        value={editLabel}
+                                                        onChange={(e) => setEditLabel(e.target.value)}
+                                                        className="flex-1 p-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+                                                        autoFocus
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') handleUpdateLabel(image.id)
+                                                            if (e.key === 'Escape') { setEditingImageId(null); setEditLabel('') }
+                                                        }}
+                                                    />
+                                                    <button onClick={() => handleUpdateLabel(image.id)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg">
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+                                                    </button>
+                                                    <button onClick={() => { setEditingImageId(null); setEditLabel('') }} className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg">
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <h4 className="font-semibold text-slate-800 text-sm truncate mb-1">
+                                                    {image.label || image.original_name}
+                                                </h4>
+                                            )}
+                                            <p className="text-xs text-slate-400 mb-3">
+                                                {formatFileSize(image.file_size)} &middot; {new Date(image.created_at).toLocaleDateString()}
+                                            </p>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => { setEditingImageId(image.id); setEditLabel(image.label || '') }}
+                                                    className="flex-1 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors"
+                                                >
+                                                    Rename
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteImage(image.id)}
+                                                    className="flex-1 px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-center py-16 bg-white border border-slate-200 rounded-xl">
+                                <div className="w-20 h-20 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                                    <svg className="w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                </div>
+                                <h3 className="text-lg font-semibold text-slate-700 mb-2">No Images Uploaded</h3>
+                                <p className="text-slate-500 mb-4">Upload images to use them in your session notes</p>
+                            </div>
+                        )}
+
+                        {/* Image Preview Modal */}
+                        {previewImage && (
+                            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-8" onClick={() => setPreviewImage(null)}>
+                                <div className="bg-white rounded-2xl max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                                    <div className="flex items-center justify-between p-4 border-b border-slate-200">
+                                        <h3 className="font-bold text-slate-800">{previewImage.label || previewImage.original_name}</h3>
+                                        <button onClick={() => setPreviewImage(null)} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                                            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <div className="p-4 flex items-center justify-center bg-slate-50">
+                                        <img
+                                            src={getImageUrl(previewImage.image_url)}
+                                            alt={previewImage.label || previewImage.original_name}
+                                            className="max-w-full max-h-[70vh] object-contain"
+                                        />
+                                    </div>
+                                    <div className="p-4 border-t border-slate-200 flex items-center justify-between text-sm text-slate-500">
+                                        <span>{previewImage.original_name} &middot; {formatFileSize(previewImage.file_size)}</span>
+                                        <span>Uploaded {new Date(previewImage.created_at).toLocaleDateString()}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )
             default:
                 return null
         }
@@ -301,7 +545,7 @@ const Settings = () => {
                 </div>
 
                 <div className="text-center">
-                    <p className="text-xs text-slate-400">© 2026 DynaCare Pro - All rights reserved</p>
+                    <p className="text-xs text-slate-400">&copy; 2026 DynaCare Pro - All rights reserved</p>
                 </div>
             </div>
         </div>

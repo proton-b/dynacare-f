@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { noteService, aiService } from '../services/api'
+import { noteService, aiService, imageService } from '../services/api'
+import ImageAnnotationOverlay from './ImageAnnotationOverlay'
+
+const API_URL = import.meta.env.VITE_BACKEND_URL
 
 const SessionNotes = () => {
     const location = useLocation()
@@ -14,36 +17,264 @@ const SessionNotes = () => {
     const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
     const [isSymptomReportLoading, setIsSymptomReportLoading] = useState(false)
     const [symptomReport, setSymptomReport] = useState(null)
+    const [libraryImages, setLibraryImages] = useState([])
+    const [isImagePickerOpen, setIsImagePickerOpen] = useState(false)
+    const [charCount, setCharCount] = useState(0)
+    const [annotationOverlay, setAnnotationOverlay] = useState(null)
 
-    const textareaRef = React.useRef(null)
+    const editorRef = useRef(null)
+    const savedSelectionRef = useRef(null)
+
+    const getImageUrl = (imageUrl) => {
+        if (!imageUrl) return ''
+        const baseUrl = API_URL.replace('/api', '')
+        return `${baseUrl}${imageUrl}`
+    }
+
+    useEffect(() => {
+        const fetchLibraryImages = async () => {
+            try {
+                const response = await imageService.getAll()
+                setLibraryImages(response.data)
+            } catch (error) {
+                console.error('Error fetching library images:', error)
+            }
+        }
+        fetchLibraryImages()
+    }, [])
+
+    // Save cursor position before opening image picker
+    const saveSelection = () => {
+        const sel = window.getSelection()
+        if (sel.rangeCount > 0) {
+            savedSelectionRef.current = sel.getRangeAt(0).cloneRange()
+        }
+    }
+
+    // Restore cursor position
+    const restoreSelection = () => {
+        if (savedSelectionRef.current) {
+            const sel = window.getSelection()
+            sel.removeAllRanges()
+            sel.addRange(savedSelectionRef.current)
+        }
+    }
+
+    // Get editor text content for character count and save
+    const getEditorContent = useCallback(() => {
+        if (!editorRef.current) return ''
+        return editorRef.current.innerHTML
+    }, [])
+
+    const getEditorTextContent = useCallback(() => {
+        if (!editorRef.current) return ''
+        return editorRef.current.innerText || ''
+    }, [])
+
+    // Insert image inline at cursor position
+    const handleInsertImage = (image) => {
+        const editor = editorRef.current
+        if (!editor) return
+
+        // Restore saved cursor position
+        restoreSelection()
+
+        // Focus editor
+        editor.focus()
+
+        const imgHtml = `<div contenteditable="false" style="margin: 12px 0; text-align: center;"><div style="display: inline-block; position: relative;" data-image-id="${image.id}" data-annotations="[]"><img src="${getImageUrl(image.image_url)}" alt="${image.label || image.original_name}" style="display: block; max-width: 100%; max-height: 400px; border-radius: 8px; border: 1px solid #e2e8f0; cursor: pointer;" title="Click to add labels" /><div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">${image.label || image.original_name} — click to annotate</div></div></div><p><br></p>`
+
+        const sel = window.getSelection()
+        if (sel.rangeCount > 0) {
+            const range = sel.getRangeAt(0)
+            range.deleteContents()
+
+            const temp = document.createElement('div')
+            temp.innerHTML = imgHtml
+            const frag = document.createDocumentFragment()
+            let lastNode
+            while (temp.firstChild) {
+                lastNode = frag.appendChild(temp.firstChild)
+            }
+            range.insertNode(frag)
+
+            // Move cursor after the inserted content
+            if (lastNode) {
+                const newRange = document.createRange()
+                newRange.setStartAfter(lastNode)
+                newRange.collapse(true)
+                sel.removeAllRanges()
+                sel.addRange(newRange)
+            }
+        } else {
+            // No selection, append at end
+            editor.innerHTML += imgHtml
+        }
+
+        setNoteContent(getEditorContent())
+        setCharCount(getEditorTextContent().length)
+        setIsImagePickerOpen(false)
+    }
 
     const handleFormat = (type) => {
-        const textarea = textareaRef.current
-        if (!textarea) return
+        const editor = editorRef.current
+        if (!editor) return
+        editor.focus()
 
-        const start = textarea.selectionStart
-        const end = textarea.selectionEnd
-        const text = noteContent
-        const selectedText = text.substring(start, end)
-
-        let formattedText = selectedText
         switch (type) {
-            case 'bold': formattedText = `**${selectedText}**`; break;
-            case 'italic': formattedText = `*${selectedText}*`; break;
-            case 'underline': formattedText = `<u>${selectedText}</u>`; break;
-            case 'list': formattedText = `\n- ${selectedText}`; break;
+            case 'bold': document.execCommand('bold', false, null); break;
+            case 'italic': document.execCommand('italic', false, null); break;
+            case 'underline': document.execCommand('underline', false, null); break;
+            case 'list': document.execCommand('insertUnorderedList', false, null); break;
             default: break;
         }
 
-        const newText = text.substring(0, start) + formattedText + text.substring(end)
-        setNoteContent(newText)
-
-        // Re-focus and set selection
-        setTimeout(() => {
-            textarea.focus()
-            textarea.setSelectionRange(start, start + formattedText.length)
-        }, 0)
+        setNoteContent(getEditorContent())
     }
+
+    const handleEditorInput = () => {
+        setNoteContent(getEditorContent())
+        setCharCount(getEditorTextContent().length)
+    }
+
+    // Handle paste - strip formatting except images
+    const handleEditorPaste = (e) => {
+        e.preventDefault()
+        const text = e.clipboardData.getData('text/plain')
+        document.execCommand('insertText', false, text)
+    }
+
+    // Click handler for images in the editor — opens annotation overlay
+    const handleEditorClick = useCallback((e) => {
+        // Find the closest image or annotation overlay element
+        const clickedImg = e.target.tagName === 'IMG' ? e.target : null
+        const clickedOverlay = e.target.closest('.annotation-overlay')
+
+        if (!clickedImg && !clickedOverlay) return
+
+        const wrapper = (clickedImg || clickedOverlay).closest('div[data-image-id]')
+        if (!wrapper) return
+
+        e.preventDefault()
+        e.stopPropagation()
+
+        const imageId = wrapper.getAttribute('data-image-id')
+        const existingAnnotations = wrapper.getAttribute('data-annotations')
+        let annotations = []
+        try {
+            annotations = existingAnnotations ? JSON.parse(existingAnnotations) : []
+        } catch (err) {
+            annotations = []
+        }
+
+        // Find the image src — it might be in annotation-overlay or directly in wrapper
+        const img = wrapper.querySelector('img')
+        if (!img) return
+
+        setAnnotationOverlay({
+            imageSrc: img.src,
+            imageId,
+            imageLabel: img.alt || '',
+            annotations,
+            targetElement: wrapper
+        })
+    }, [])
+
+    useEffect(() => {
+        const editor = editorRef.current
+        if (!editor) return
+        editor.addEventListener('click', handleEditorClick)
+        return () => editor.removeEventListener('click', handleEditorClick)
+    }, [handleEditorClick])
+
+    // Save annotations back into the editor DOM
+    const handleAnnotationSave = useCallback((annotations) => {
+        if (!annotationOverlay) return
+
+        let wrapper = annotationOverlay.targetElement
+        // Verify wrapper is still in the editor
+        if (!editorRef.current?.contains(wrapper)) {
+            wrapper = editorRef.current?.querySelector(`div[data-image-id="${annotationOverlay.imageId}"]`)
+        }
+        if (!wrapper) { setAnnotationOverlay(null); return }
+
+        // Store annotations data
+        wrapper.setAttribute('data-annotations', JSON.stringify(annotations))
+
+        // Extract the bare <img> — it may be inside .annotation-overlay or directly in wrapper
+        const existingOverlay = wrapper.querySelector('.annotation-overlay')
+        let img = wrapper.querySelector('img')
+        if (!img) { setAnnotationOverlay(null); return }
+
+        // Get a clean img element (clone to strip from old parent)
+        const cleanImg = img.cloneNode(true)
+        cleanImg.style.cssText = 'display:block;max-width:100%;max-height:400px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer;'
+        cleanImg.title = 'Click to add labels'
+
+        // Remove the old overlay if it exists
+        if (existingOverlay) {
+            existingOverlay.remove()
+        }
+        // Remove the old bare img if it's still directly in wrapper
+        const remainingImg = wrapper.querySelector('img')
+        if (remainingImg) remainingImg.remove()
+
+        // Find the caption div (last child div with font-size 11px)
+        const caption = wrapper.querySelector('div[style*="font-size"]')
+
+        if (annotations.length > 0) {
+            // Create a container that wraps the image + annotation pins/labels
+            const imgContainer = document.createElement('div')
+            imgContainer.className = 'annotation-overlay'
+            imgContainer.setAttribute('contenteditable', 'false')
+            imgContainer.style.cssText = 'position:relative;display:inline-block;cursor:pointer;'
+
+            imgContainer.appendChild(cleanImg)
+
+            // SVG for connector lines
+            let svgLines = ''
+            annotations.forEach(ann => {
+                const lx = ann.xPct > 60 ? ann.xPct - 18 : ann.xPct + 10
+                const ly = ann.yPct > 15 ? ann.yPct - 10 : ann.yPct + 10
+                svgLines += `<line x1="${ann.xPct}%" y1="${ann.yPct}%" x2="${lx}%" y2="${ly}%" stroke="#0284c7" stroke-width="1.5" stroke-dasharray="4 2" />`
+            })
+            const svgTmp = document.createElement('div')
+            svgTmp.innerHTML = `<svg style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;">${svgLines}</svg>`
+            imgContainer.appendChild(svgTmp.firstChild)
+
+            // Pins and labels
+            annotations.forEach(ann => {
+                const lx = ann.xPct > 60 ? ann.xPct - 18 : ann.xPct + 10
+                const ly = ann.yPct > 15 ? ann.yPct - 10 : ann.yPct + 10
+
+                const pin = document.createElement('div')
+                pin.style.cssText = `position:absolute;left:${ann.xPct}%;top:${ann.yPct}%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#0284c7;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.3);z-index:2;pointer-events:none;`
+                imgContainer.appendChild(pin)
+
+                const label = document.createElement('div')
+                label.style.cssText = `position:absolute;left:${lx}%;top:${ly}%;transform:translate(-50%,-50%);background:white;border:1px solid #0284c7;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;color:#0369a1;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.15);z-index:3;pointer-events:none;`
+                label.textContent = ann.label
+                imgContainer.appendChild(label)
+            })
+
+            // Insert the annotated container before caption
+            if (caption) {
+                wrapper.insertBefore(imgContainer, caption)
+            } else {
+                wrapper.appendChild(imgContainer)
+            }
+        } else {
+            // No annotations — just put back the clean image
+            if (caption) {
+                wrapper.insertBefore(cleanImg, caption)
+            } else {
+                wrapper.appendChild(cleanImg)
+            }
+        }
+
+        setNoteContent(getEditorContent())
+        setAnnotationOverlay(null)
+    }, [annotationOverlay, getEditorContent])
 
     useEffect(() => {
         if (location.state) {
@@ -58,32 +289,37 @@ const SessionNotes = () => {
     }, [location.state]);
 
     const templates = {
-        intake: `# Initial Assessment\n\n**Chief Complaint:** \n\n**History of Present Illness:** \n\n**Past Psychiatric History:** \n\n**Mental Status Exam:** \n- Appearance: \n- Mood: \n- Affect: \n- Thought Process: \n\n**Diagnosis:** \n\n**Treatment Plan:** `,
-        followup: `# Follow-up Session\n\n**Subjective:** \n\n**Objective:** \n\n**Assessment:** \n\n**Plan:** `,
-        progress: `# Progress Review\n\n**Review of Goals:** \n\n**Interventions Used:** \n\n**Response to Treatment:** \n\n**Next Steps:** `,
-        crisis: `# Crisis Intervention\n\n**Nature of Crisis:** \n\n**Safety Assessment:** \n- Ideation: \n- Plan: \n- Intent: \n\n**Interventions:** \n\n**Safety Plan Established:** [Yes/No]\n\n**Follow-up Plan:** `,
-        termination: `# Termination Session\n\n**Summary of Treatment:** \n\n**Goals Achieved:** \n\n**Maintenance Plan:** \n\n**Referrals Provided:** `
+        intake: `<h2>Initial Assessment</h2><p><b>Chief Complaint:</b> </p><p><b>History of Present Illness:</b> </p><p><b>Past Psychiatric History:</b> </p><p><b>Mental Status Exam:</b></p><ul><li>Appearance: </li><li>Mood: </li><li>Affect: </li><li>Thought Process: </li></ul><p><b>Diagnosis:</b> </p><p><b>Treatment Plan:</b> </p>`,
+        followup: `<h2>Follow-up Session</h2><p><b>Subjective:</b> </p><p><b>Objective:</b> </p><p><b>Assessment:</b> </p><p><b>Plan:</b> </p>`,
+        progress: `<h2>Progress Review</h2><p><b>Review of Goals:</b> </p><p><b>Interventions Used:</b> </p><p><b>Response to Treatment:</b> </p><p><b>Next Steps:</b> </p>`,
+        crisis: `<h2>Crisis Intervention</h2><p><b>Nature of Crisis:</b> </p><p><b>Safety Assessment:</b></p><ul><li>Ideation: </li><li>Plan: </li><li>Intent: </li></ul><p><b>Interventions:</b> </p><p><b>Safety Plan Established:</b> [Yes/No]</p><p><b>Follow-up Plan:</b> </p>`,
+        termination: `<h2>Termination Session</h2><p><b>Summary of Treatment:</b> </p><p><b>Goals Achieved:</b> </p><p><b>Maintenance Plan:</b> </p><p><b>Referrals Provided:</b> </p>`
     }
 
     const handleApplyTemplate = (id) => {
-        console.log('Applying template:', id);
         const templateContent = templates[id];
-        if (!templateContent) {
-            console.error('Template not found for ID:', id);
+        if (!templateContent) return;
+
+        const editorText = getEditorTextContent()
+        if (editorText && editorText.trim().length > 10 && !window.confirm("This will overwrite your current note. Continue?")) {
             return;
         }
 
-        if (noteContent && noteContent.length > 10 && !window.confirm("This will overwrite your current note. Continue?")) {
-            return;
+        if (editorRef.current) {
+            editorRef.current.innerHTML = templateContent
         }
         setNoteContent(templateContent);
+        setCharCount(0);
         setSelectedTemplate(id);
         setActiveTab('editor');
         setIsTemplatesOpen(false);
     }
 
     const handleSaveNote = async () => {
-        if (!noteContent.trim()) {
+        const content = getEditorContent()
+        const textContent = getEditorTextContent()
+
+        if (!textContent.trim()) {
             alert("Please enter some content before saving.");
             return;
         }
@@ -93,7 +329,7 @@ const SessionNotes = () => {
             const noteData = {
                 patient_id: location.state?.patientId || 1,
                 appointment_id: location.state?.appointmentId || null,
-                content: noteContent,
+                content: content,
                 status: 'Finalized',
                 ai_insights: aiSummary ? JSON.stringify(aiSummary) : null
             };
@@ -109,7 +345,7 @@ const SessionNotes = () => {
     }
 
     const handleGetSymptomReport = async () => {
-        const sourceData = noteContent || transcriptData;
+        const sourceData = getEditorTextContent() || transcriptData;
 
         if (!sourceData || sourceData.trim().length < 10) {
             alert("Please paste the session transcript or notes into the editor first to analyze symptoms.");
@@ -253,8 +489,8 @@ const SessionNotes = () => {
                                                 </div>
                                                 <button
                                                     onClick={handleGetSymptomReport}
-                                                    disabled={isSymptomReportLoading || (!noteContent && !transcriptData)}
-                                                    className={`px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-all flex items-center space-x-2 shadow-lg shadow-indigo-200 ${(isSymptomReportLoading || (!noteContent && !transcriptData)) ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                                    disabled={isSymptomReportLoading || (!getEditorTextContent() && !transcriptData)}
+                                                    className={`px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-all flex items-center space-x-2 shadow-lg shadow-indigo-200 ${(isSymptomReportLoading || (!getEditorTextContent() && !transcriptData)) ? 'opacity-70 cursor-not-allowed' : ''}`}
                                                 >
                                                     {isSymptomReportLoading ? (
                                                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -306,20 +542,78 @@ const SessionNotes = () => {
                                                     </svg>
                                                 </button>
                                             </div>
+                                            {/* Insert Image Button */}
+                                            <div className="relative">
+                                                <button
+                                                    onClick={() => { saveSelection(); setIsImagePickerOpen(!isImagePickerOpen) }}
+                                                    className={`p-2 rounded transition-colors flex items-center space-x-1 ${isImagePickerOpen ? 'bg-primary-100 text-primary-700' : 'hover:bg-slate-200 text-slate-700'}`}
+                                                    title="Insert Image from Library"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                    </svg>
+                                                    <span className="text-xs font-medium">Image</span>
+                                                </button>
+                                                {/* Image Picker Dropdown */}
+                                                {isImagePickerOpen && (
+                                                    <div className="absolute left-0 top-full mt-2 w-80 bg-white border border-slate-200 rounded-xl shadow-xl z-30 overflow-hidden">
+                                                        <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+                                                            <h4 className="font-semibold text-slate-800 text-sm">Insert Image</h4>
+                                                            <button onClick={() => setIsImagePickerOpen(false)} className="p-1 hover:bg-slate-100 rounded">
+                                                                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            </button>
+                                                        </div>
+                                                        <div className="max-h-64 overflow-y-auto p-2">
+                                                            {libraryImages.length > 0 ? (
+                                                                <div className="grid grid-cols-3 gap-2">
+                                                                    {libraryImages.map((img) => (
+                                                                        <button
+                                                                            key={img.id}
+                                                                            onClick={() => handleInsertImage(img)}
+                                                                            className="relative aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-primary-500 transition-all"
+                                                                        >
+                                                                            <img
+                                                                                src={getImageUrl(img.image_url)}
+                                                                                alt={img.label || img.original_name}
+                                                                                className="w-full h-full object-cover"
+                                                                            />
+                                                                            <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 py-0.5">
+                                                                                <p className="text-[9px] text-white truncate">{img.label || img.original_name}</p>
+                                                                            </div>
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            ) : (
+                                                                <div className="text-center py-6">
+                                                                    <svg className="w-8 h-8 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                                    </svg>
+                                                                    <p className="text-xs text-slate-500">No images yet</p>
+                                                                    <p className="text-[10px] text-slate-400 mt-1">Upload images in Settings &rarr; Image Library</p>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
 
-                                    {/* Text Editor */}
+                                    {/* Rich Text Editor (contentEditable) */}
                                     <div className="mb-6 flex-1 flex flex-col min-h-0">
-                                        <textarea
-                                            ref={textareaRef}
-                                            value={noteContent}
-                                            onChange={(e) => setNoteContent(e.target.value)}
-                                            placeholder="Begin typing your clinical notes here... Use the toolbar above for formatting or select a template to get started."
-                                            className="w-full flex-1 p-4 border-2 border-slate-200 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-100 outline-none resize-none text-slate-700 leading-relaxed font-mono"
+                                        <div
+                                            ref={editorRef}
+                                            contentEditable
+                                            suppressContentEditableWarning
+                                            onInput={handleEditorInput}
+                                            onPaste={handleEditorPaste}
+                                            data-placeholder="Begin typing your clinical notes here... Use the toolbar above for formatting, select a template, or insert images from your library."
+                                            className="w-full flex-1 p-4 border-2 border-slate-200 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-100 outline-none overflow-y-auto text-slate-700 leading-relaxed min-h-[300px] empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400 empty:before:pointer-events-none"
+                                            style={{ wordBreak: 'break-word' }}
                                         />
+
                                         <div className="flex items-center justify-between mt-2 text-sm text-slate-500">
-                                            <span>{noteContent.length} characters</span>
+                                            <span>{charCount} characters</span>
                                             <span>Auto-saved 2 minutes ago</span>
                                         </div>
                                     </div>
@@ -393,7 +687,12 @@ const SessionNotes = () => {
                                                 </div>
                                                 <div className="flex items-center space-x-3 mt-6">
                                                     <button
-                                                        onClick={() => setNoteContent(prev => prev + `\n\n--- AI Summary ---\nMood: ${aiSummary.overview.mood}\nAffect: ${aiSummary.overview.affect}\nThemes: ${aiSummary.clinicalInsights?.themes?.join(', ') || 'N/A'}`)}
+                                                        onClick={() => {
+                                                            if (editorRef.current) {
+                                                                editorRef.current.innerHTML += `<hr><p><b>AI Summary</b></p><p><b>Mood:</b> ${aiSummary.overview.mood}</p><p><b>Affect:</b> ${aiSummary.overview.affect}</p><p><b>Themes:</b> ${aiSummary.clinicalInsights?.themes?.join(', ') || 'N/A'}</p>`
+                                                                setNoteContent(getEditorContent())
+                                                            }
+                                                        }}
                                                         className="text-sm font-bold text-primary-600 hover:text-primary-700 px-4 py-2 bg-white rounded-lg border border-primary-200"
                                                     >
                                                         Copy to Notes
@@ -445,8 +744,10 @@ const SessionNotes = () => {
                                                     )}
                                                     <button
                                                         onClick={() => {
-                                                            const reportText = `\n\n--- Symptom Report ---\nImpression: ${symptomReport.overall_impression}\nSymptoms Found: ${symptomReport.symptoms.map(s => `${s.symptom} (${s.severity})`).join(', ')}`;
-                                                            setNoteContent(prev => prev + reportText);
+                                                            if (editorRef.current) {
+                                                                editorRef.current.innerHTML += `<hr><p><b>Symptom Report</b></p><p><b>Impression:</b> ${symptomReport.overall_impression}</p><p><b>Symptoms Found:</b> ${symptomReport.symptoms.map(s => `${s.symptom} (${s.severity})`).join(', ')}</p>`
+                                                                setNoteContent(getEditorContent())
+                                                            }
                                                         }}
                                                         className="mt-6 w-full py-3 bg-white border-2 border-indigo-200 text-indigo-700 font-bold rounded-xl hover:bg-indigo-50 transition-colors flex items-center justify-center space-x-2"
                                                     >
@@ -518,7 +819,13 @@ const SessionNotes = () => {
                                                     <span>Session Transcript</span>
                                                 </h3>
                                                 <button
-                                                    onClick={() => setNoteContent(prev => prev + "\n\n--- Transcript ---\n" + transcriptData)}
+                                                    onClick={() => {
+                                                        if (editorRef.current) {
+                                                            const escaped = transcriptData.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+                                                            editorRef.current.innerHTML += `<hr><p><b>Transcript</b></p><p>${escaped}</p>`
+                                                            setNoteContent(getEditorContent())
+                                                        }
+                                                    }}
                                                     className="px-4 py-2 bg-primary-50 text-primary-600 rounded-lg font-bold hover:bg-primary-100 transition-all flex items-center space-x-2"
                                                 >
                                                     <span>📋</span>
@@ -950,6 +1257,18 @@ const SessionNotes = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Image Annotation Overlay */}
+            {annotationOverlay && (
+                <ImageAnnotationOverlay
+                    imageSrc={annotationOverlay.imageSrc}
+                    imageId={annotationOverlay.imageId}
+                    imageLabel={annotationOverlay.imageLabel}
+                    annotations={annotationOverlay.annotations}
+                    onSave={handleAnnotationSave}
+                    onClose={() => setAnnotationOverlay(null)}
+                />
+            )}
         </div>
     )
 }

@@ -95,6 +95,15 @@ export const clinicalService = {
     getTreatmentPlans: (patientId) => api.get(`/clinical/treatment-plans/${patientId}`),
 };
 
+export const imageService = {
+    getAll: () => api.get('/images'),
+    upload: (formData) => api.post('/images/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+    update: (id, data) => api.patch(`/images/${id}`, data),
+    delete: (id) => api.delete(`/images/${id}`),
+};
+
 export const settingsService = {
     get: () => api.get('/settings'),
     update: (settingsData) => api.patch('/settings', settingsData),
