@@ -66,12 +66,12 @@ const Sidebar = () => {
     return (
         <aside className="w-64 bg-white border-r border-slate-200 flex flex-col">
             {/* Logo */}
-            <div className="py-2 pt-5 px-4">
-                <img src={logo} alt="DynaCare Logo" className="w-56 h-auto object-contain mix-blend-multiply -mt-15" />
+            <div className="px-4 py-4 flex items-center justify-center">
+                <img src={logo} alt="DynaCare Logo" className="w-44 h-auto object-contain mix-blend-multiply" />
             </div>
 
             {/* Navigation */}
-            <nav className="flex-1 p-4 space-y-1 -mt-10">
+            <nav className="flex-1 p-4 space-y-1">
                 {menuItems.map((item, index) => {
                     const isActive = location.pathname === item.path
                     return (

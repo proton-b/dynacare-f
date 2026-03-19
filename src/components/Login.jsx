@@ -50,8 +50,8 @@ const Login = () => {
                 <div className="min-h-full flex flex-col items-center justify-start px-8 sm:px-12 lg:px-16 pt-0">
                     <div className="w-full max-w-md space-y-8">
                         <div className="text-left">
-                            <div className="flex justify-start mb-2 mt-10">
-                                <img src={logo} alt="DynaCare Logo" className="w-80 h-auto object-contain mix-blend-multiply" />
+                            <div className="flex justify-center mb-2 mt-10">
+                                <img src={logo} alt="DynaCare Logo" className="w-64 h-auto object-contain mix-blend-multiply" />
                             </div>
                             <h2 className="text-3xl font-bold text-slate-900 font-display">Welcome back</h2>
                             <p className="mt-2 text-slate-600">Please enter your details to sign in.</p>
