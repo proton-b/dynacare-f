@@ -288,12 +288,192 @@ const SessionNotes = () => {
         }
     }, [location.state]);
 
+    const sectionHeader = (title) =>
+        `<div style="background:#f8fafc;border-left:3px solid #4338ca;padding:6px 12px;margin:20px 0 12px 0;"><b style="color:#1e293b;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;">${title}</b></div>`
+
+    const fieldRow = (label, placeholder = '') =>
+        `<p style="margin:6px 0;line-height:1.8;"><b style="color:#334155;">${label}:</b> <span style="color:#64748b;">${placeholder || '_______________'}</span></p>`
+
+    const tableRow = (label, value = '') =>
+        `<tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;color:#334155;width:40%;background:#f8fafc;">${label}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;color:#64748b;">${value}</td></tr>`
+
+    const docHeader = (title, subtitle) =>
+        `<div style="background:#1e293b;color:white;padding:20px 24px;border-radius:8px 8px 0 0;margin:-4px -4px 0 -4px;">` +
+        `<div style="display:flex;justify-content:space-between;align-items:center;">` +
+        `<div><div style="font-size:20px;font-weight:700;letter-spacing:0.02em;">DynaCare</div></div>` +
+        `<div style="text-align:right;"><div style="font-size:14px;opacity:0.8;">${title}</div></div>` +
+        `</div></div>` +
+        `<div style="background:#f1f5f9;padding:12px 24px;border:1px solid #e2e8f0;border-top:none;margin:0 -4px 16px -4px;display:flex;gap:40px;">` +
+        `<div><div style="font-size:10px;color:#4338ca;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Patient Name</div><div style="font-size:13px;color:#0f172a;margin-top:2px;">_______________</div></div>` +
+        `<div><div style="font-size:10px;color:#4338ca;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Date of Service</div><div style="font-size:13px;color:#0f172a;margin-top:2px;">${new Date().toLocaleDateString()}</div></div>` +
+        `<div><div style="font-size:10px;color:#4338ca;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Clinician</div><div style="font-size:13px;color:#0f172a;margin-top:2px;">_______________</div></div>` +
+        `</div>`
+
+    const docFooter = () =>
+        `<div style="margin-top:24px;padding-top:12px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;">` +
+        `<span style="font-size:10px;color:#94a3b8;">DynaCare &mdash; HIPAA Compliant Mental Health Platform</span>` +
+        `<span style="font-size:10px;color:#94a3b8;">Clinician Signature: _______________</span>` +
+        `</div>`
+
     const templates = {
-        intake: `<h2>Initial Assessment</h2><p><b>Chief Complaint:</b> </p><p><b>History of Present Illness:</b> </p><p><b>Past Psychiatric History:</b> </p><p><b>Mental Status Exam:</b></p><ul><li>Appearance: </li><li>Mood: </li><li>Affect: </li><li>Thought Process: </li></ul><p><b>Diagnosis:</b> </p><p><b>Treatment Plan:</b> </p>`,
-        followup: `<h2>Follow-up Session</h2><p><b>Subjective:</b> </p><p><b>Objective:</b> </p><p><b>Assessment:</b> </p><p><b>Plan:</b> </p>`,
-        progress: `<h2>Progress Review</h2><p><b>Review of Goals:</b> </p><p><b>Interventions Used:</b> </p><p><b>Response to Treatment:</b> </p><p><b>Next Steps:</b> </p>`,
-        crisis: `<h2>Crisis Intervention</h2><p><b>Nature of Crisis:</b> </p><p><b>Safety Assessment:</b></p><ul><li>Ideation: </li><li>Plan: </li><li>Intent: </li></ul><p><b>Interventions:</b> </p><p><b>Safety Plan Established:</b> [Yes/No]</p><p><b>Follow-up Plan:</b> </p>`,
-        termination: `<h2>Termination Session</h2><p><b>Summary of Treatment:</b> </p><p><b>Goals Achieved:</b> </p><p><b>Maintenance Plan:</b> </p><p><b>Referrals Provided:</b> </p>`
+        intake: docHeader('Initial Assessment', 'Comprehensive intake evaluation') +
+            sectionHeader('Chief Complaint') +
+            fieldRow('Presenting Problem') +
+            fieldRow('Duration of Symptoms') +
+            fieldRow('Precipitating Factors') +
+            sectionHeader('History of Present Illness') +
+            fieldRow('Onset') +
+            fieldRow('Course') +
+            fieldRow('Previous Treatment') +
+            fieldRow('Current Medications') +
+            sectionHeader('Past Psychiatric History') +
+            fieldRow('Previous Diagnoses') +
+            fieldRow('Hospitalizations') +
+            fieldRow('Substance Use History') +
+            fieldRow('Family Psychiatric History') +
+            sectionHeader('Mental Status Examination') +
+            `<table style="width:100%;border-collapse:collapse;margin:8px 0;">` +
+            tableRow('Appearance', '') +
+            tableRow('Behavior', '') +
+            tableRow('Speech', '') +
+            tableRow('Mood (self-reported)', '') +
+            tableRow('Affect (observed)', '') +
+            tableRow('Thought Process', '') +
+            tableRow('Thought Content', '') +
+            tableRow('Perceptions', '') +
+            tableRow('Cognition', '') +
+            tableRow('Insight / Judgment', '') +
+            `</table>` +
+            sectionHeader('Risk Assessment') +
+            `<table style="width:100%;border-collapse:collapse;margin:8px 0;">` +
+            tableRow('Suicidal Ideation', 'None / Passive / Active') +
+            tableRow('Homicidal Ideation', 'None / Passive / Active') +
+            tableRow('Self-Harm', 'None / Historical / Current') +
+            tableRow('Overall Risk Level', 'Low / Moderate / High') +
+            `</table>` +
+            sectionHeader('Diagnostic Impression') +
+            fieldRow('Primary Diagnosis (DSM-5)') +
+            fieldRow('Secondary Diagnosis') +
+            fieldRow('Rule-Out') +
+            sectionHeader('Treatment Plan') +
+            fieldRow('Treatment Goals') +
+            fieldRow('Recommended Interventions') +
+            fieldRow('Medication Recommendations') +
+            fieldRow('Follow-up Schedule') +
+            docFooter(),
+
+        followup: docHeader('Follow-up Session Note', 'SOAP format progress note') +
+            sectionHeader('Subjective') +
+            fieldRow('Patient Report') +
+            fieldRow('Mood (self-reported)') +
+            fieldRow('Sleep / Appetite') +
+            fieldRow('Medication Compliance') +
+            fieldRow('Stressors Since Last Visit') +
+            sectionHeader('Objective') +
+            `<table style="width:100%;border-collapse:collapse;margin:8px 0;">` +
+            tableRow('Appearance', '') +
+            tableRow('Affect', '') +
+            tableRow('Speech', '') +
+            tableRow('Thought Process', '') +
+            tableRow('Insight / Judgment', '') +
+            `</table>` +
+            sectionHeader('Assessment') +
+            fieldRow('Clinical Impression') +
+            fieldRow('Progress Toward Goals') +
+            fieldRow('Risk Assessment', 'Low / Moderate / High') +
+            sectionHeader('Plan') +
+            fieldRow('Interventions Used This Session') +
+            fieldRow('Medication Changes') +
+            fieldRow('Homework / Assignments') +
+            fieldRow('Next Appointment') +
+            docFooter(),
+
+        progress: docHeader('Progress Review', 'Treatment progress evaluation') +
+            sectionHeader('Treatment Goals Review') +
+            `<table style="width:100%;border-collapse:collapse;margin:8px 0;">` +
+            tableRow('Goal 1', '') +
+            tableRow('Status', 'Not Started / In Progress / Achieved') +
+            tableRow('Goal 2', '') +
+            tableRow('Status', 'Not Started / In Progress / Achieved') +
+            tableRow('Goal 3', '') +
+            tableRow('Status', 'Not Started / In Progress / Achieved') +
+            `</table>` +
+            sectionHeader('Interventions & Response') +
+            fieldRow('Therapeutic Modalities Used') +
+            fieldRow('Patient Response to Treatment') +
+            fieldRow('Barriers to Progress') +
+            sectionHeader('Symptom Tracking') +
+            `<table style="width:100%;border-collapse:collapse;margin:8px 0;">` +
+            tableRow('Primary Symptoms', '') +
+            tableRow('Severity (1-10)', '') +
+            tableRow('Change Since Last Review', 'Improved / Stable / Worsened') +
+            `</table>` +
+            sectionHeader('Recommendations') +
+            fieldRow('Treatment Plan Modifications') +
+            fieldRow('Referrals') +
+            fieldRow('Next Review Date') +
+            docFooter(),
+
+        crisis: docHeader('Crisis Intervention', 'Urgent clinical documentation') +
+            `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:12px 16px;margin:0 0 16px 0;">` +
+            `<b style="color:#991b1b;font-size:12px;">PRIORITY: CRISIS DOCUMENTATION</b>` +
+            `</div>` +
+            sectionHeader('Crisis Presentation') +
+            fieldRow('Nature of Crisis') +
+            fieldRow('Onset / Trigger') +
+            fieldRow('Current Symptoms') +
+            sectionHeader('Safety Assessment') +
+            `<table style="width:100%;border-collapse:collapse;margin:8px 0;">` +
+            tableRow('Suicidal Ideation', 'None / Passive / Active with Plan') +
+            tableRow('Plan', 'N/A or describe') +
+            tableRow('Intent', 'N/A / Low / Moderate / High') +
+            tableRow('Access to Means', 'None / Limited / Available') +
+            tableRow('Protective Factors', '') +
+            tableRow('Homicidal Ideation', 'None / Passive / Active') +
+            tableRow('Overall Risk Level', 'Low / Moderate / High / Imminent') +
+            `</table>` +
+            sectionHeader('Interventions') +
+            fieldRow('Interventions Provided') +
+            fieldRow('De-escalation Techniques Used') +
+            fieldRow('Collateral Contacts Made') +
+            sectionHeader('Safety Plan') +
+            fieldRow('Warning Signs Identified') +
+            fieldRow('Coping Strategies') +
+            fieldRow('Support Contacts') +
+            fieldRow('Emergency Resources Provided') +
+            fieldRow('Safety Plan Established', 'Yes / No') +
+            sectionHeader('Disposition') +
+            fieldRow('Disposition', 'Discharged / Referred / Hospitalized') +
+            fieldRow('Follow-up Plan') +
+            fieldRow('Follow-up Timeframe') +
+            docFooter(),
+
+        termination: docHeader('Termination Summary', 'End of treatment documentation') +
+            sectionHeader('Treatment Summary') +
+            fieldRow('Total Sessions Attended') +
+            fieldRow('Treatment Duration') +
+            fieldRow('Primary Diagnosis at Intake') +
+            fieldRow('Diagnosis at Discharge') +
+            sectionHeader('Goals & Outcomes') +
+            `<table style="width:100%;border-collapse:collapse;margin:8px 0;">` +
+            tableRow('Goal 1', '') +
+            tableRow('Outcome', 'Achieved / Partially / Not Achieved') +
+            tableRow('Goal 2', '') +
+            tableRow('Outcome', 'Achieved / Partially / Not Achieved') +
+            tableRow('Goal 3', '') +
+            tableRow('Outcome', 'Achieved / Partially / Not Achieved') +
+            `</table>` +
+            sectionHeader('Clinical Progress') +
+            fieldRow('Symptom Changes') +
+            fieldRow('Functional Improvements') +
+            fieldRow('Remaining Concerns') +
+            sectionHeader('Discharge Plan') +
+            fieldRow('Reason for Termination') +
+            fieldRow('Maintenance Strategies') +
+            fieldRow('Relapse Prevention Plan') +
+            fieldRow('Referrals Provided') +
+            fieldRow('Recommended Follow-up') +
+            docFooter()
     }
 
     const handleApplyTemplate = (id) => {
@@ -365,21 +545,82 @@ const SessionNotes = () => {
         }
     }
 
+    const tabIcons = {
+        editor: (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+        ),
+        'ai-insights': (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+        ),
+        transcript: (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+        ),
+        assessments: (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+        ),
+        history: (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        ),
+        export: (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+        ),
+    }
+
     const tabs = [
-        { id: 'editor', label: 'Editor', icon: '✏️' },
-        { id: 'ai-insights', label: 'AI Insights', icon: '🤖' },
-        { id: 'transcript', label: 'Transcript', icon: '📝' },
-        { id: 'assessments', label: 'Assessments', icon: '📊' },
-        { id: 'history', label: 'History', icon: '🕐' },
-        { id: 'export', label: 'Export', icon: '📥' }
+        { id: 'editor', label: 'Editor' },
+        { id: 'ai-insights', label: 'AI Insights' },
+        { id: 'transcript', label: 'Transcript' },
+        { id: 'assessments', label: 'Assessments' },
+        { id: 'history', label: 'History' },
+        { id: 'export', label: 'Export' }
     ]
 
+    const templateIcons = {
+        intake: (
+            <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+            </svg>
+        ),
+        followup: (
+            <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+        ),
+        progress: (
+            <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+            </svg>
+        ),
+        crisis: (
+            <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+        ),
+        termination: (
+            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        ),
+    }
+
     const templateOptions = [
-        { id: 'intake', name: 'Initial Assessment', icon: '⭐' },
-        { id: 'followup', name: 'Follow-up Session', icon: '🔄' },
-        { id: 'progress', name: 'Progress Review', icon: '📈' },
-        { id: 'crisis', name: 'Crisis Intervention', icon: '🚨' },
-        { id: 'termination', name: 'Termination Session', icon: '✓' }
+        { id: 'intake', name: 'Initial Assessment' },
+        { id: 'followup', name: 'Follow-up Session' },
+        { id: 'progress', name: 'Progress Review' },
+        { id: 'crisis', name: 'Crisis Intervention' },
+        { id: 'termination', name: 'Termination Session' }
     ]
 
     const sessionInfo = {
@@ -394,10 +635,28 @@ const SessionNotes = () => {
         status: 'In Progress'
     }
 
+    const quickActionIcons = {
+        'Save Draft': (
+            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+            </svg>
+        ),
+        'Export Report': (
+            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+        ),
+        'Schedule Follow-up': (
+            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+        ),
+    }
+
     const quickActions = [
-        { label: 'Save Draft', icon: '💾', onClick: handleSaveNote },
-        { label: 'Export Report', icon: '📄' },
-        { label: 'Schedule Follow-up', icon: '📅' }
+        { label: 'Save Draft', onClick: handleSaveNote },
+        { label: 'Export Report' },
+        { label: 'Schedule Follow-up' }
     ]
 
     return (
@@ -439,7 +698,7 @@ const SessionNotes = () => {
                                                     : 'text-slate-600 hover:bg-slate-50'
                                                     }`}
                                             >
-                                                <span>{tab.icon}</span>
+                                                {tabIcons[tab.id]}
                                                 <span>{tab.label}</span>
                                             </button>
                                         ))}
@@ -655,7 +914,9 @@ const SessionNotes = () => {
                                         <div className="space-y-6">
                                             <div className="p-6 bg-gradient-to-br from-blue-50 to-purple-50 border border-blue-200 rounded-lg">
                                                 <h3 className="font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                                                    <span>🤖</span>
+                                                    <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                                    </svg>
                                                     <span>AI-Generated Clinical Summary</span>
                                                 </h3>
                                                 <div className="space-y-4">
@@ -730,7 +991,9 @@ const SessionNotes = () => {
                                                     {symptomReport.risk_factors && symptomReport.risk_factors.length > 0 && (
                                                         <div className="mt-6 p-4 bg-red-50 border border-red-100 rounded-lg">
                                                             <h4 className="text-sm font-bold text-red-700 mb-2 flex items-center space-x-2">
-                                                                <span>⚠️</span>
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                                </svg>
                                                                 <span>Identified Risk Factors</span>
                                                             </h4>
                                                             <div className="flex flex-wrap gap-2">
@@ -954,7 +1217,9 @@ const SessionNotes = () => {
                                         {/* Assessment History */}
                                         <div className="bg-white border border-slate-200 rounded-xl p-6">
                                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                                                <span>📈</span>
+                                                <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                                </svg>
                                                 <span>Score Trends</span>
                                             </h3>
                                             <div className="space-y-4">
@@ -1084,14 +1349,16 @@ const SessionNotes = () => {
                                         {/* Export Format Selection */}
                                         <div className="bg-white border border-slate-200 rounded-xl p-6">
                                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                                                <span>📄</span>
+                                                <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                </svg>
                                                 <span>Export Format</span>
                                             </h3>
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                 {[
-                                                    { format: 'PDF', icon: '📕', description: 'Professional clinical report format', recommended: true },
-                                                    { format: 'Word', icon: '📘', description: 'Editable document format (.docx)', recommended: false },
-                                                    { format: 'CSV', icon: '📗', description: 'Data export for analysis', recommended: false }
+                                                    { format: 'PDF', color: 'text-red-500 bg-red-50', description: 'Professional clinical report format', recommended: true },
+                                                    { format: 'Word', color: 'text-blue-500 bg-blue-50', description: 'Editable document format (.docx)', recommended: false },
+                                                    { format: 'CSV', color: 'text-green-500 bg-green-50', description: 'Data export for analysis', recommended: false }
                                                 ].map((option, index) => (
                                                     <button key={index} className={`relative p-6 rounded-xl border-2 text-left transition-all hover:shadow-md ${option.recommended ? 'border-primary-500 bg-primary-50' : 'border-slate-200 hover:border-slate-300'}`}>
                                                         {option.recommended && (
@@ -1099,7 +1366,11 @@ const SessionNotes = () => {
                                                                 Recommended
                                                             </span>
                                                         )}
-                                                        <span className="text-3xl mb-3 block">{option.icon}</span>
+                                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-3 ${option.color}`}>
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                                            </svg>
+                                                        </div>
                                                         <h4 className="font-bold text-slate-800 mb-1">{option.format}</h4>
                                                         <p className="text-sm text-slate-500">{option.description}</p>
                                                     </button>
@@ -1206,7 +1477,7 @@ const SessionNotes = () => {
                                             : 'bg-slate-50 border-2 border-transparent hover:border-slate-200'
                                             }`}
                                     >
-                                        <span className="text-xl">{template.icon}</span>
+                                        {templateIcons[template.id]}
                                         <span className="text-sm font-medium text-slate-700">{template.name}</span>
                                     </button>
                                 ))}
@@ -1248,7 +1519,7 @@ const SessionNotes = () => {
                                         onClick={action.onClick}
                                         className="w-full text-left p-3 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors flex items-center space-x-3 border-2 border-transparent hover:border-slate-200"
                                     >
-                                        <span className="text-xl">{action.icon}</span>
+                                        {quickActionIcons[action.label]}
                                         <span className="text-sm font-medium text-slate-700">{action.label}</span>
                                     </button>
                                 ))}

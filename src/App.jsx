@@ -8,6 +8,7 @@ import SessionNotes from './components/SessionNotes'
 import SessionRecording from './components/SessionRecording'
 import DSM5Reference from './components/DSM5Reference'
 import Settings from './components/Settings'
+import Journals from './components/Journals'
 import './dashboard.css'
 
 import { AuthProvider } from './context/AuthContext'
@@ -30,6 +31,7 @@ function App() {
                         <Route path="notes" element={<SessionNotes />} />
                         <Route path="recording" element={<SessionRecording />} />
                         <Route path="dsm-5" element={<DSM5Reference />} />
+                        <Route path="journals" element={<Journals />} />
                         <Route path="settings" element={<Settings />} />
                     </Route>
                 </Routes>

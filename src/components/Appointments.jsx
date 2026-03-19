@@ -8,11 +8,34 @@ const Appointments = () => {
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false)
   const [appointments, setAppointments] = useState([])
   const [stats, setStats] = useState([
-    { label: 'Today', value: 0, icon: '📅', color: 'bg-blue-50', textColor: 'text-blue-600' },
-    { label: 'This Week', value: 0, icon: '📆', color: 'bg-green-50', textColor: 'text-green-600' },
-    { label: 'Pending', value: 0, icon: '⏳', color: 'bg-yellow-50', textColor: 'text-yellow-600' },
-    { label: 'This Month', value: 0, icon: '✓', color: 'bg-emerald-50', textColor: 'text-emerald-600' },
+    { label: 'Today', value: 0, key: 'today', color: 'bg-blue-50', iconColor: 'text-blue-600' },
+    { label: 'This Week', value: 0, key: 'week', color: 'bg-green-50', iconColor: 'text-green-600' },
+    { label: 'Pending', value: 0, key: 'pending', color: 'bg-amber-50', iconColor: 'text-amber-600' },
+    { label: 'This Month', value: 0, key: 'month', color: 'bg-emerald-50', iconColor: 'text-emerald-600' },
   ])
+
+  const statIcons = {
+    today: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    ),
+    week: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+      </svg>
+    ),
+    pending: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+    month: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  }
 
   const fetchAppointments = async () => {
     try {
@@ -28,10 +51,10 @@ const Appointments = () => {
       const response = await appointmentService.getStats()
       const data = response.data
       setStats([
-        { label: 'Today', value: data.today, icon: '📅', color: 'bg-blue-50', textColor: 'text-blue-600' },
-        { label: 'This Week', value: data.week, icon: '📆', color: 'bg-green-50', textColor: 'text-green-600' },
-        { label: 'Pending', value: data.pending, icon: '⏳', color: 'bg-yellow-50', textColor: 'text-yellow-600' },
-        { label: 'This Month', value: data.month, icon: '✓', color: 'bg-emerald-50', textColor: 'text-emerald-600' },
+        { label: 'Today', value: data.today, key: 'today', color: 'bg-blue-50', iconColor: 'text-blue-600' },
+        { label: 'This Week', value: data.week, key: 'week', color: 'bg-green-50', iconColor: 'text-green-600' },
+        { label: 'Pending', value: data.pending, key: 'pending', color: 'bg-amber-50', iconColor: 'text-amber-600' },
+        { label: 'This Month', value: data.month, key: 'month', color: 'bg-emerald-50', iconColor: 'text-emerald-600' },
       ])
     } catch (err) {
       console.error('Error fetching stats:', err)
@@ -146,16 +169,16 @@ const Appointments = () => {
       {/* Content */}
       <div className="px-8 py-6">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
           {stats.map((stat, index) => (
-            <div key={index} className="bg-white rounded-xl p-6 border border-slate-200 hover:shadow-lg transition-shadow">
+            <div key={index} className="bg-white rounded-xl p-5 border border-slate-200">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-500 mb-1">{stat.label}</p>
-                  <h3 className="text-3xl font-bold text-slate-800">{stat.value}</h3>
+                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">{stat.label}</p>
+                  <h3 className="text-2xl font-bold text-slate-800 mt-1">{stat.value}</h3>
                 </div>
-                <div className={`w-12 h-12 ${stat.color} rounded-xl flex items-center justify-center text-2xl`}>
-                  {stat.icon}
+                <div className={`w-10 h-10 ${stat.color} rounded-lg flex items-center justify-center ${stat.iconColor}`}>
+                  {statIcons[stat.key]}
                 </div>
               </div>
             </div>

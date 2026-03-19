@@ -58,9 +58,11 @@ export const recordingService = {
     getByPatientId: (patientId) => api.get('/recordings', { params: { patientId } }),
     getById: (id) => api.get(`/recordings/${id}`),
     upload: (recordingData) => api.post('/recordings/upload', recordingData),
-    uploadAudioFile: (formData) => api.post('/recordings/upload-file', formData, {
+    uploadAudioFile: (formData, onUploadProgress) => api.post('/recordings/upload-file', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress,
     }),
+    update: (id, data) => api.patch(`/recordings/${id}`, data),
     transcribeAudio: (formData) => api.post('/recordings/transcribe', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
     }),
@@ -102,6 +104,11 @@ export const imageService = {
     }),
     update: (id, data) => api.patch(`/images/${id}`, data),
     delete: (id) => api.delete(`/images/${id}`),
+};
+
+export const journalService = {
+    getMyJournals: () => api.get('/journals'),
+    getAllJournals: () => api.get('/journals/all'),
 };
 
 export const settingsService = {

@@ -3,6 +3,15 @@ import { patientService, clinicalService, noteService, recordingService } from '
 import EditPatientModal from './modals/EditPatientModal'
 import SessionDetailsModal from './modals/SessionDetailsModal'
 
+const API_URL = import.meta.env.VITE_BACKEND_URL
+
+const getAudioUrl = (audioUrl) => {
+    if (!audioUrl) return ''
+    if (audioUrl.startsWith('http')) return audioUrl
+    const baseUrl = API_URL.replace('/api', '')
+    return `${baseUrl}${audioUrl}`
+}
+
 const PatientProfile = () => {
     const [activeTab, setActiveTab] = useState('medical-history')
     const [patient, setPatient] = useState(null)
@@ -18,8 +27,10 @@ const PatientProfile = () => {
     const [diagnoses, setDiagnoses] = useState([])
     const [treatmentPlans, setTreatmentPlans] = useState([])
     const [sessions, setSessions] = useState([])
+    const [patientRecordings, setPatientRecordings] = useState([])
     const [isSessionDetailsOpen, setIsSessionDetailsOpen] = useState(false)
     const [selectedSession, setSelectedSession] = useState(null)
+    const [expandedAudioId, setExpandedAudioId] = useState(null)
 
     const [patients, setPatients] = useState([])
 
@@ -75,12 +86,15 @@ const PatientProfile = () => {
                     // If a note exists for a patient within a 30-min window of a recording, assume they are the same event
                     const noteTimestamps = notes.map(n => new Date(n.created_at).getTime());
 
-                    const recordings = recRes.data.map(r => ({
+                    const allRecordings = recRes.data.map(r => ({
                         ...r,
                         type: 'recording',
                         status: 'Completed',
                         content: 'Audio Recording: ' + (r.duration ? `${Math.floor(r.duration / 60)}m ${r.duration % 60}s` : 'Unknown duration')
-                    })).filter(r => {
+                    }));
+                    setPatientRecordings(allRecordings);
+
+                    const recordings = allRecordings.filter(r => {
                         const recTime = new Date(r.created_at).getTime();
                         // check if any note is within 30 minutes
                         const hasMatchingNote = noteTimestamps.some(t => Math.abs(t - recTime) < 30 * 60 * 1000);
@@ -113,11 +127,40 @@ const PatientProfile = () => {
         setIsSessionDetailsOpen(true);
     };
 
+    const tabIcons = {
+        'medical-history': (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+        ),
+        'recordings': (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+            </svg>
+        ),
+        'medications': (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+            </svg>
+        ),
+        'diagnoses': (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+        ),
+        'treatment-plan': (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+        ),
+    }
+
     const tabs = [
-        { id: 'medical-history', label: 'Medical History', icon: '📋' },
-        { id: 'medications', label: 'Medications', icon: '💊' },
-        { id: 'diagnoses', label: 'Diagnoses', icon: '🔍' },
-        { id: 'treatment-plan', label: 'Treatment Plan', icon: '📊' }
+        { id: 'medical-history', label: 'Medical History' },
+        { id: 'recordings', label: 'Recordings', count: patientRecordings.length },
+        { id: 'medications', label: 'Medications' },
+        { id: 'diagnoses', label: 'Diagnoses' },
+        { id: 'treatment-plan', label: 'Treatment Plan' }
     ]
 
     if (loading) return (
@@ -132,7 +175,11 @@ const PatientProfile = () => {
     if (error || !patient) return (
         <div className="flex-1 flex items-center justify-center bg-slate-50">
             <div className="text-center p-8 bg-white rounded-2xl shadow-sm border border-slate-200">
-                <div className="text-4xl mb-4">🏥</div>
+                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                </div>
                 <h2 className="text-xl font-bold text-slate-800 mb-2">Patient Not Found</h2>
                 <p className="text-slate-500 mb-6">{error || "No patient records are currently available."}</p>
                 <button className="btn-primary" onClick={() => window.location.reload()}>Try Again</button>
@@ -240,13 +287,16 @@ const PatientProfile = () => {
                                         <button
                                             key={tab.id}
                                             onClick={() => setActiveTab(tab.id)}
-                                            className={`flex items - center space - x - 2 px - 4 py - 3 rounded - lg font - medium transition - colors ${activeTab === tab.id
+                                            className={`flex items-center space-x-2 px-4 py-3 rounded-lg font-medium transition-colors ${activeTab === tab.id
                                                 ? 'bg-primary-50 text-primary-700'
                                                 : 'text-slate-600 hover:bg-slate-50'
-                                                } `}
+                                                }`}
                                         >
-                                            <span>{tab.icon}</span>
+                                            {tabIcons[tab.id]}
                                             <span>{tab.label}</span>
+                                            {tab.count > 0 && (
+                                                <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold bg-primary-100 text-primary-700 rounded-full">{tab.count}</span>
+                                            )}
                                         </button>
                                     ))}
                                 </div>
@@ -279,7 +329,9 @@ const PatientProfile = () => {
                                                 {allergies.map((allergy, index) => (
                                                     <div key={index} className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                                                         <div className="flex items-start space-x-2">
-                                                            <span className="text-yellow-600">⚠️</span>
+                                                            <svg className="w-5 h-5 text-yellow-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                            </svg>
                                                             <div>
                                                                 <h4 className="font-semibold text-slate-800">{allergy.name}</h4>
                                                                 <p className="text-sm text-slate-600 mt-1">{allergy.reaction}</p>
@@ -323,9 +375,17 @@ const PatientProfile = () => {
                                                     <div key={index} className="p-4 bg-white border border-slate-200 rounded-lg hover:shadow-md transition-shadow">
                                                         <div className="flex items-center justify-between">
                                                             <div className="flex items-center space-x-3">
-                                                                <span className="text-2xl">
-                                                                    {session.type === 'recording' ? '🎤' : '📓'}
-                                                                </span>
+                                                                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${session.type === 'recording' ? 'bg-primary-50 text-primary-600' : 'bg-slate-100 text-slate-500'}`}>
+                                                                    {session.type === 'recording' ? (
+                                                                        <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                                                        </svg>
+                                                                    ) : (
+                                                                        <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                        </svg>
+                                                                    )}
+                                                                </div>
                                                                 <div>
                                                                     <h4 className="font-semibold text-slate-800">
                                                                         {session.type === 'recording' ? 'Session Recording' :
@@ -335,31 +395,217 @@ const PatientProfile = () => {
                                                                         <span className="font-medium text-primary-600">{session.status}</span>
                                                                         <span>•</span>
                                                                         <span>{session.patient_name}</span>
+                                                                        {session.type === 'recording' && session.duration && (
+                                                                            <>
+                                                                                <span>•</span>
+                                                                                <span>{Math.floor(session.duration / 60)}m {session.duration % 60}s</span>
+                                                                            </>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             </div>
-                                                            <div className="text-right">
-                                                                <div className="text-sm text-slate-600">
-                                                                    {new Date(session.created_at).toLocaleDateString('en-IN', {
-                                                                        day: 'numeric',
-                                                                        month: 'short',
-                                                                        year: 'numeric',
-                                                                        timeZone: 'Asia/Kolkata'
-                                                                    })}
+                                                            <div className="flex items-center space-x-3">
+                                                                {/* Audio Play Button for recordings */}
+                                                                {session.type === 'recording' && session.audio_url && (
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation()
+                                                                            setExpandedAudioId(expandedAudioId === session.id ? null : session.id)
+                                                                        }}
+                                                                        className={`p-2.5 rounded-xl transition-all flex items-center space-x-1.5 text-xs font-bold ${expandedAudioId === session.id
+                                                                            ? 'bg-primary-100 text-primary-700'
+                                                                            : 'bg-slate-100 text-slate-600 hover:bg-primary-50 hover:text-primary-600'
+                                                                            }`}
+                                                                        title="Play audio"
+                                                                    >
+                                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            {expandedAudioId === session.id ? (
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                                                                            ) : (
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                                                            )}
+                                                                        </svg>
+                                                                        <span>{expandedAudioId === session.id ? 'Hide' : 'Play'}</span>
+                                                                    </button>
+                                                                )}
+                                                                <div className="text-right">
+                                                                    <div className="text-sm text-slate-600">
+                                                                        {new Date(session.created_at).toLocaleDateString('en-IN', {
+                                                                            day: 'numeric',
+                                                                            month: 'short',
+                                                                            year: 'numeric',
+                                                                            timeZone: 'Asia/Kolkata'
+                                                                        })}
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => handleViewSessionDetails(session)}
+                                                                        className="text-xs text-primary-600 font-bold hover:text-primary-700 mt-1 flex items-center justify-end space-x-1"
+                                                                    >
+                                                                        <span>View Details</span>
+                                                                        <span>→</span>
+                                                                    </button>
                                                                 </div>
-                                                                <button
-                                                                    onClick={() => handleViewSessionDetails(session)}
-                                                                    className="text-xs text-primary-600 font-bold hover:text-primary-700 mt-1 flex items-center justify-end space-x-1"
-                                                                >
-                                                                    <span>View Details</span>
-                                                                    <span>→</span>
-                                                                </button>
                                                             </div>
                                                         </div>
+                                                        {/* Expanded Audio Player */}
+                                                        {session.type === 'recording' && session.audio_url && expandedAudioId === session.id && (
+                                                            <div className="mt-4 pt-4 border-t border-slate-100">
+                                                                <audio
+                                                                    controls
+                                                                    className="w-full h-10"
+                                                                    src={getAudioUrl(session.audio_url)}
+                                                                    preload="metadata"
+                                                                >
+                                                                    Your browser does not support the audio element.
+                                                                </audio>
+                                                                {session.transcript && (
+                                                                    <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-100 max-h-32 overflow-y-auto">
+                                                                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Transcript</p>
+                                                                        <p className="text-sm text-slate-600 leading-relaxed">{session.transcript}</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>
                                         </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'recordings' && (
+                                    <div className="space-y-6">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <h3 className="text-lg font-bold text-slate-800">Session Recordings</h3>
+                                                <p className="text-sm text-slate-500 mt-1">All audio recordings for this patient</p>
+                                            </div>
+                                            <span className="text-sm font-bold text-primary-600">{patientRecordings.length} recording{patientRecordings.length !== 1 ? 's' : ''}</span>
+                                        </div>
+
+                                        {patientRecordings.length === 0 ? (
+                                            <div className="py-12 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                                                    <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                                    </svg>
+                                                </div>
+                                                <p className="text-slate-500 font-medium">No recordings yet</p>
+                                                <p className="text-sm text-slate-400 mt-1">Upload or record a session to see it here</p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                {patientRecordings.map((rec) => (
+                                                    <div key={rec.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
+                                                        <div className="p-5">
+                                                            <div className="flex items-center justify-between">
+                                                                <div className="flex items-center space-x-4">
+                                                                    <div className="w-12 h-12 bg-primary-50 rounded-xl flex items-center justify-center shrink-0">
+                                                                        <svg className="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                                                        </svg>
+                                                                    </div>
+                                                                    <div>
+                                                                        <h4 className="font-bold text-slate-800">
+                                                                            Session Recording
+                                                                        </h4>
+                                                                        <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-1 text-sm text-slate-500">
+                                                                            <span>
+                                                                                {new Date(rec.created_at).toLocaleDateString('en-IN', {
+                                                                                    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
+                                                                                })}
+                                                                                {' '}
+                                                                                {new Date(rec.created_at).toLocaleTimeString('en-IN', {
+                                                                                    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
+                                                                                })}
+                                                                            </span>
+                                                                            {rec.duration && (
+                                                                                <>
+                                                                                    <span>•</span>
+                                                                                    <span>{Math.floor(rec.duration / 60)}m {rec.duration % 60}s</span>
+                                                                                </>
+                                                                            )}
+                                                                            {rec.file_size && (
+                                                                                <>
+                                                                                    <span>•</span>
+                                                                                    <span>
+                                                                                        {rec.file_size < 1024 * 1024
+                                                                                            ? (rec.file_size / 1024).toFixed(1) + ' KB'
+                                                                                            : (rec.file_size / (1024 * 1024)).toFixed(1) + ' MB'
+                                                                                        }
+                                                                                    </span>
+                                                                                </>
+                                                                            )}
+                                                                            {rec.format && (
+                                                                                <>
+                                                                                    <span>•</span>
+                                                                                    <span className="uppercase text-xs font-semibold bg-slate-100 px-1.5 py-0.5 rounded">{rec.format}</span>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center space-x-2">
+                                                                    <button
+                                                                        onClick={() => setExpandedAudioId(expandedAudioId === rec.id ? null : rec.id)}
+                                                                        className={`p-2.5 rounded-xl transition-all flex items-center space-x-1.5 text-xs font-bold ${expandedAudioId === rec.id
+                                                                            ? 'bg-primary-600 text-white'
+                                                                            : 'bg-primary-50 text-primary-600 hover:bg-primary-100'
+                                                                            }`}
+                                                                    >
+                                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            {expandedAudioId === rec.id ? (
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                                                                            ) : (
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                                                            )}
+                                                                        </svg>
+                                                                        <span>{expandedAudioId === rec.id ? 'Hide' : 'Play'}</span>
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleViewSessionDetails(rec)}
+                                                                        className="p-2.5 rounded-xl bg-slate-50 text-slate-600 hover:bg-slate-100 transition-all text-xs font-bold flex items-center space-x-1.5"
+                                                                    >
+                                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                        </svg>
+                                                                        <span>Details</span>
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Expanded Audio Player + Transcript */}
+                                                            {expandedAudioId === rec.id && (
+                                                                <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
+                                                                    {rec.audio_url ? (
+                                                                        <audio
+                                                                            controls
+                                                                            autoPlay
+                                                                            className="w-full"
+                                                                            src={getAudioUrl(rec.audio_url)}
+                                                                            preload="metadata"
+                                                                        >
+                                                                            Your browser does not support the audio element.
+                                                                        </audio>
+                                                                    ) : (
+                                                                        <div className="p-3 bg-yellow-50 border border-yellow-100 rounded-lg text-sm text-yellow-700">
+                                                                            Audio file not available for this recording.
+                                                                        </div>
+                                                                    )}
+                                                                    {rec.transcript && (
+                                                                        <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
+                                                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Transcript</p>
+                                                                            <p className="text-sm text-slate-600 leading-relaxed max-h-40 overflow-y-auto">{rec.transcript}</p>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
@@ -446,7 +692,9 @@ const PatientProfile = () => {
                         {/* Treatment Progress Chart */}
                         <div className="bg-white rounded-xl border border-slate-200 p-6">
                             <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center space-x-2">
-                                <span>📈</span>
+                                <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                </svg>
                                 <span>Treatment Progress</span>
                             </h3>
 
@@ -491,7 +739,12 @@ const PatientProfile = () => {
                         <div className="bg-white rounded-xl border border-slate-200 p-6">
                             <div className="flex items-center justify-between mb-4">
                                 <h3 className="text-lg font-bold text-slate-800">Contact Information</h3>
-                                <button className="text-sm text-primary-600 hover:text-primary-700">✏️ Edit</button>
+                                <button className="text-sm text-primary-600 hover:text-primary-700 flex items-center space-x-1">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                    <span>Edit</span>
+                                </button>
                             </div>
 
                             <div className="space-y-4">

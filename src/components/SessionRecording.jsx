@@ -36,6 +36,8 @@ const SessionRecording = () => {
   const [uploadNotes, setUploadNotes] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadStep, setUploadStep] = useState('') // 'uploading' | 'transcribing' | 'summarizing'
   const fileInputRef = useRef(null)
 
   // Language selection
@@ -372,22 +374,32 @@ const SessionRecording = () => {
 
     setUploading(true)
     setUploadError('')
+    setUploadProgress(0)
+    setUploadStep('uploading')
+
+    let recordingId = null
 
     try {
-      // Step 1: Upload the audio file
+      // Step 1: Upload the audio file with progress tracking
       const formData = new FormData()
       formData.append('audio', uploadFile)
       formData.append('patient_id', selectedPatient)
       if (uploadDuration) formData.append('duration', uploadDuration)
       if (uploadNotes) formData.append('notes', uploadNotes)
 
-      const response = await recordingService.uploadAudioFile(formData)
+      const response = await recordingService.uploadAudioFile(formData, (progressEvent) => {
+        const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+        setUploadProgress(percent)
+      })
 
       if (response.data) {
+        recordingId = response.data.id
         setRecordings(prev => [response.data, ...prev])
       }
 
       // Step 2: Transcribe the audio file using Whisper if no notes provided
+      setUploadStep('transcribing')
+      setUploadProgress(0)
       let transcriptText = uploadNotes ? uploadNotes.trim() : ''
 
       if (!transcriptText) {
@@ -409,6 +421,15 @@ const SessionRecording = () => {
         }
       }
 
+      // Save transcript to the recording in the database
+      if (recordingId && transcriptText.length > 0) {
+        try {
+          await recordingService.update(recordingId, { transcript: transcriptText })
+        } catch (updateErr) {
+          console.error('Error saving transcript to recording:', updateErr)
+        }
+      }
+
       // Detect symptoms from the transcript
       if (transcriptText.length > 0) {
         detectSymptoms(transcriptText)
@@ -416,6 +437,7 @@ const SessionRecording = () => {
 
       // Step 3: Generate clinical summary from transcript
       if (transcriptText.length > 0) {
+        setUploadStep('summarizing')
         setGeneratingSummary(true)
         try {
           const summaryResponse = await recordingService.generateClinicalSummary({
@@ -426,6 +448,22 @@ const SessionRecording = () => {
 
           if (summaryResponse.data && summaryResponse.data.success) {
             setClinicalSummary(summaryResponse.data.summary)
+
+            // Save summary to the recording in the database
+            if (recordingId) {
+              try {
+                await recordingService.update(recordingId, { summary: summaryResponse.data.summary })
+                // Update the local recordings list with the complete data
+                setRecordings(prev => prev.map(r =>
+                  r.id === recordingId
+                    ? { ...r, transcript: transcriptText, summary: JSON.stringify(summaryResponse.data.summary) }
+                    : r
+                ))
+              } catch (updateErr) {
+                console.error('Error saving summary to recording:', updateErr)
+              }
+            }
+
             setShowSummaryModal(true)
           } else {
             throw new Error('Summary generation failed: ' + (summaryResponse.data?.message || 'Unknown error'))
@@ -457,6 +495,8 @@ const SessionRecording = () => {
       setUploadError(err.response?.data?.message || 'Failed to upload audio file')
     } finally {
       setUploading(false)
+      setUploadProgress(0)
+      setUploadStep('')
     }
   }
 
@@ -721,28 +761,83 @@ const SessionRecording = () => {
                   </div>
                 </div>
 
-                {/* Upload Button */}
-                <div className="mt-6 flex justify-end">
-                  <button
-                    onClick={handleUploadAudio}
-                    disabled={uploading || !uploadFile || !selectedPatient}
-                    className="px-8 py-3 bg-primary-600 text-white font-bold rounded-xl shadow-lg shadow-primary-200 hover:bg-primary-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-                  >
-                    {uploading ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        <span>Uploading...</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                        </svg>
-                        <span>Upload Audio</span>
-                      </>
+                {/* Upload Progress */}
+                {uploading && (
+                  <div className="mt-6 p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
+                    {/* Step Indicators */}
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <div className={`flex items-center space-x-2 ${uploadStep === 'uploading' ? 'text-primary-600' : uploadStep === 'transcribing' || uploadStep === 'summarizing' ? 'text-green-600' : 'text-slate-400'}`}>
+                        {uploadStep === 'uploading' ? (
+                          <div className="w-4 h-4 border-2 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+                        ) : (uploadStep === 'transcribing' || uploadStep === 'summarizing') ? (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                        ) : (
+                          <div className="w-4 h-4 rounded-full border-2 border-slate-300"></div>
+                        )}
+                        <span>Upload</span>
+                      </div>
+                      <div className="flex-1 h-px bg-slate-200 mx-3"></div>
+                      <div className={`flex items-center space-x-2 ${uploadStep === 'transcribing' ? 'text-primary-600' : uploadStep === 'summarizing' ? 'text-green-600' : 'text-slate-400'}`}>
+                        {uploadStep === 'transcribing' ? (
+                          <div className="w-4 h-4 border-2 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+                        ) : uploadStep === 'summarizing' ? (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                        ) : (
+                          <div className="w-4 h-4 rounded-full border-2 border-slate-300"></div>
+                        )}
+                        <span>Transcribe</span>
+                      </div>
+                      <div className="flex-1 h-px bg-slate-200 mx-3"></div>
+                      <div className={`flex items-center space-x-2 ${uploadStep === 'summarizing' ? 'text-primary-600' : 'text-slate-400'}`}>
+                        {uploadStep === 'summarizing' ? (
+                          <div className="w-4 h-4 border-2 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+                        ) : (
+                          <div className="w-4 h-4 rounded-full border-2 border-slate-300"></div>
+                        )}
+                        <span>AI Summary</span>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar (shown during file upload step) */}
+                    {uploadStep === 'uploading' && (
+                      <div>
+                        <div className="flex items-center justify-between text-xs text-slate-500 mb-1.5">
+                          <span>Uploading {uploadFile?.name}</span>
+                          <span className="font-bold text-primary-600">{uploadProgress}%</span>
+                        </div>
+                        <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary-600 rounded-full transition-all duration-300 ease-out"
+                            style={{ width: `${uploadProgress}%` }}
+                          ></div>
+                        </div>
+                      </div>
                     )}
-                  </button>
-                </div>
+
+                    {uploadStep === 'transcribing' && (
+                      <p className="text-sm text-slate-500">Transcribing audio with AI (Whisper)...</p>
+                    )}
+                    {uploadStep === 'summarizing' && (
+                      <p className="text-sm text-slate-500">Generating clinical summary...</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Upload Button */}
+                {!uploading && (
+                  <div className="mt-6 flex justify-end">
+                    <button
+                      onClick={handleUploadAudio}
+                      disabled={!uploadFile || !selectedPatient}
+                      className="px-8 py-3 bg-primary-600 text-white font-bold rounded-xl shadow-lg shadow-primary-200 hover:bg-primary-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <span>Upload Audio</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

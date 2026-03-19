@@ -1,17 +1,29 @@
 import React from 'react';
 import { exportClinicalSummaryToPDF } from '../../utils/pdfExport';
 
+const API_URL = import.meta.env.VITE_BACKEND_URL
+
+const getAudioUrl = (audioUrl) => {
+    if (!audioUrl) return ''
+    if (audioUrl.startsWith('http')) return audioUrl
+    const baseUrl = API_URL.replace('/api', '')
+    return `${baseUrl}${audioUrl}`
+}
+
 const SessionDetailsModal = ({ isOpen, onClose, session }) => {
     if (!isOpen || !session) return null;
 
-    // Parse AI insights if it's a string
+    // Parse AI insights from either ai_insights (notes) or summary (recordings)
     let aiSummary = null;
-    try {
-        aiSummary = typeof session.ai_insights === 'string'
-            ? JSON.parse(session.ai_insights)
-            : session.ai_insights;
-    } catch (e) {
-        console.error("Error parsing AI insights", e);
+    const rawInsights = session.ai_insights || session.summary;
+    if (rawInsights) {
+        try {
+            aiSummary = typeof rawInsights === 'string'
+                ? JSON.parse(rawInsights)
+                : rawInsights;
+        } catch (e) {
+            console.error("Error parsing AI insights", e);
+        }
     }
 
     return (
@@ -21,7 +33,7 @@ const SessionDetailsModal = ({ isOpen, onClose, session }) => {
                 <div className="px-8 py-6 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                     <div className="flex items-center space-x-4">
                         <div className="w-12 h-12 bg-primary-100 rounded-2xl flex items-center justify-center text-2xl">
-                            📓
+                            {session.type === 'recording' ? '🎤' : '📓'}
                         </div>
                         <div>
                             <h2 className="text-2xl font-bold text-slate-800">Session Details</h2>
@@ -51,10 +63,62 @@ const SessionDetailsModal = ({ isOpen, onClose, session }) => {
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                         {/* Left Column: Note Content */}
                         <div className="lg:col-span-2 space-y-8">
+                            {/* Audio Player for recordings */}
+                            {session.type === 'recording' && session.audio_url && (
+                                <section>
+                                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Session Audio</h3>
+                                    <div className="bg-gradient-to-br from-primary-50 to-slate-50 rounded-2xl p-6 border border-primary-100">
+                                        <div className="flex items-center space-x-4 mb-4">
+                                            <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center">
+                                                <svg className="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-slate-800">Session Recording</p>
+                                                <div className="flex items-center space-x-3 text-sm text-slate-500">
+                                                    {session.duration && (
+                                                        <span>{Math.floor(session.duration / 60)}m {session.duration % 60}s</span>
+                                                    )}
+                                                    {session.file_size && (
+                                                        <>
+                                                            <span>•</span>
+                                                            <span>{session.file_size < 1024 * 1024
+                                                                ? (session.file_size / 1024).toFixed(1) + ' KB'
+                                                                : (session.file_size / (1024 * 1024)).toFixed(1) + ' MB'
+                                                            }</span>
+                                                        </>
+                                                    )}
+                                                    {session.format && (
+                                                        <>
+                                                            <span>•</span>
+                                                            <span className="uppercase">{session.format}</span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <audio
+                                            controls
+                                            className="w-full"
+                                            src={getAudioUrl(session.audio_url)}
+                                            preload="metadata"
+                                        >
+                                            Your browser does not support the audio element.
+                                        </audio>
+                                    </div>
+                                </section>
+                            )}
+
                             <section>
-                                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Clinical Note</h3>
+                                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">
+                                    {session.type === 'recording' ? 'Transcript' : 'Clinical Note'}
+                                </h3>
                                 <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 min-h-[300px] whitespace-pre-wrap text-slate-700 leading-relaxed shadow-inner">
-                                    {session.content}
+                                    {session.type === 'recording'
+                                        ? (session.transcript || 'No transcript available for this recording.')
+                                        : session.content
+                                    }
                                 </div>
                             </section>
 
