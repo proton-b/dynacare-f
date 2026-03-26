@@ -162,12 +162,12 @@ const Appointments = () => {
             <h1 className="text-3xl font-bold text-slate-800 font-display">Appointment Scheduling</h1>
             <p className="text-slate-500 mt-1">Manage your psychiatric practice calendar and patient appointments</p>
           </div>
-          <button className="flex items-center space-x-2 bg-slate-50 rounded-full py-2 px-4 hover:bg-slate-100 transition-colors">
+          {/* <button className="flex items-center space-x-2 bg-slate-50 rounded-full py-2 px-4 hover:bg-slate-100 transition-colors">
             <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
             <span className="text-sm font-medium text-slate-700">Select Contact</span>
-          </button>
+          </button> */}
         </div>
       </header>
 
