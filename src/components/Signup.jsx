@@ -54,7 +54,7 @@ const Signup = () => {
 
             // Assume the backend returns { user: {...}, token: '...' } upon registration
             login(response.data.user, response.data.token);
-            navigate('/');
+            navigate('/dashboard');
         } catch (err) {
             console.error('Registration failed:', err);
             setError(err.response?.data?.message || 'Failed to create account. Please try again.');

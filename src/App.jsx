@@ -20,10 +20,11 @@ function App() {
         <AuthProvider>
             <BrowserRouter>
                 <Routes>
+                    <Route path="/" element={<Login />} />
                     <Route path="/login" element={<Login />} />
                     <Route path="/signup" element={<Signup />} />
 
-                    <Route path="/" element={<Layout />}>
+                    <Route path="/dashboard" element={<Layout />}>
                         <Route index element={<Dashboard />} />
                         <Route path="appointments" element={<Appointments />} />
                         {/* Add more routes as needed */}

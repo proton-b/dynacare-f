@@ -34,7 +34,7 @@ const Login = () => {
             // Assume the backend returns { user: {...}, token: '...' }
             // Adjust according to your actual backend response structure
             login(response.data.user, response.data.token);
-            navigate('/');
+            navigate('/dashboard');
         } catch (err) {
             console.error('Login failed:', err);
             setError(err.response?.data?.message || 'Failed to login. Please check your credentials.');
