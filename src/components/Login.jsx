@@ -12,8 +12,14 @@ const Login = () => {
     });
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const { login } = useAuth();
+    const { login, user } = useAuth();
     const navigate = useNavigate();
+    const token = localStorage.getItem('token');
+
+    if (user && token) {
+        navigate('/dashboard', { replace: true });
+        return null;
+    }
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;

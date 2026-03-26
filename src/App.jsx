@@ -9,6 +9,7 @@ import SessionRecording from './components/SessionRecording'
 import DSM5Reference from './components/DSM5Reference'
 import Settings from './components/Settings'
 import Journals from './components/Journals'
+import ProtectedRoute from './components/ProtectedRoute'
 import './dashboard.css'
 
 import { AuthProvider } from './context/AuthContext'
@@ -24,10 +25,11 @@ function App() {
                     <Route path="/login" element={<Login />} />
                     <Route path="/signup" element={<Signup />} />
 
-                    <Route path="/dashboard" element={<Layout />}>
+                    <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
                         <Route index element={<Dashboard />} />
+                    </Route>
+                    <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
                         <Route path="appointments" element={<Appointments />} />
-                        {/* Add more routes as needed */}
                         <Route path="patients" element={<PatientProfile />} />
                         <Route path="notes" element={<SessionNotes />} />
                         <Route path="recording" element={<SessionRecording />} />
