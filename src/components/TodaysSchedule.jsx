@@ -90,7 +90,7 @@ const TodaysSchedule = () => {
             ) : appointments.length > 0 ? (
                 <div className="space-y-4">
                     {appointments.map((app, index) => (
-                        <div key={index} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
+                        <div key={index} onClick={() => navigate(`/patients?patientId=${app.patient_id}`)} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:shadow-md hover:border-primary-200 transition-all">
                             <div className="flex items-center space-x-4">
                                 <div className="text-center bg-white p-2 rounded-lg border border-slate-200 w-24">
                                     <p className="text-xs font-bold text-primary-600 uppercase">
@@ -109,7 +109,7 @@ const TodaysSchedule = () => {
                             <div className="flex items-center space-x-3">
                                 {app.status === 'Scheduled' && (
                                     <button
-                                        onClick={() => handleStartSession(app.patient_id)}
+                                        onClick={(e) => { e.stopPropagation(); handleStartSession(app.patient_id); }}
                                         className="px-4 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
                                     >
                                         Start Session

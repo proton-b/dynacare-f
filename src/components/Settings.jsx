@@ -95,6 +95,7 @@ const Settings = () => {
 
     const getImageUrl = (imageUrl) => {
         if (!imageUrl) return ''
+        if (imageUrl.startsWith('http')) return imageUrl
         const baseUrl = API_URL.replace('/api', '')
         return `${baseUrl}${imageUrl}`
     }
@@ -412,7 +413,6 @@ const Settings = () => {
                                                 <img
                                                     src={getImageUrl(image.image_url)}
                                                     alt={image.label || image.original_name}
-                                                    crossOrigin="anonymous"
                                                     className="w-full h-full object-cover"
                                                     onError={() => setFailedImages(prev => new Set([...prev, image.id]))}
                                                 />
@@ -498,7 +498,6 @@ const Settings = () => {
                                         <img
                                             src={getImageUrl(previewImage.image_url)}
                                             alt={previewImage.label || previewImage.original_name}
-                                            crossOrigin="anonymous"
                                             className="max-w-full max-h-[70vh] object-contain"
                                         />
                                     </div>

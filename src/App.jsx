@@ -30,8 +30,8 @@ function App() {
                         <Route path="patients" element={<PatientProfile />} />
                         <Route path="notes" element={<SessionNotes />} />
                         <Route path="recording" element={<SessionRecording />} />
-                        <Route path="dsm-5" element={<DSM5Reference />} />
                         <Route path="journals" element={<Journals />} />
+                        <Route path="journals/dsm-5" element={<DSM5Reference />} />
                         <Route path="settings" element={<Settings />} />
                     </Route>
                 </Routes>

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { dsm5Service } from '../services/api'
 
 const DSM5Reference = () => {
+    const navigate = useNavigate()
     const [activeCategory, setActiveCategory] = useState('All Disorders')
     const [searchQuery, setSearchQuery] = useState('')
     const [disorders, setDisorders] = useState([])
@@ -118,6 +120,15 @@ const DSM5Reference = () => {
             <header className="bg-white border-b border-slate-200 px-8 py-6">
                 <div className="flex items-center justify-between mb-6">
                     <div>
+                        <button
+                            onClick={() => navigate('/journals')}
+                            className="flex items-center space-x-1.5 text-sm font-medium text-slate-500 hover:text-primary-600 transition-colors mb-2"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                            </svg>
+                            <span>Back to Journals</span>
+                        </button>
                         <h1 className="text-3xl font-bold text-slate-800 font-display">DSM-5 Reference</h1>
                         <p className="text-slate-500 mt-1">Comprehensive diagnostic criteria and AI-powered clinical insights</p>
                     </div>

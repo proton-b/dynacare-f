@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { activityService } from '../services/api'
 import AddPatientModal from './modals/AddPatientModal'
 import ScheduleAppointmentModal from './modals/ScheduleAppointmentModal'
@@ -9,6 +9,7 @@ const RecentActivity = () => {
     const [loading, setLoading] = useState(true);
     const [isAddPatientOpen, setIsAddPatientOpen] = useState(false);
     const [isScheduleOpen, setIsScheduleOpen] = useState(false);
+    const navigate = useNavigate();
 
     const fetchLogs = async () => {
         try {
@@ -80,7 +81,8 @@ const RecentActivity = () => {
                     activities.map((activity, index) => (
                         <div
                             key={index}
-                            className="flex items-center space-x-4 p-4 bg-blue-50/50 rounded-lg border border-blue-100"
+                            onClick={() => activity.patient_id && navigate(`/patients?patientId=${activity.patient_id}`)}
+                            className="flex items-center space-x-4 p-4 bg-blue-50/50 rounded-lg border border-blue-100 cursor-pointer hover:shadow-md hover:border-primary-200 transition-all"
                         >
                             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
                                 <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -89,7 +91,9 @@ const RecentActivity = () => {
                             </div>
                             <div className="flex-1">
                                 <p className="text-sm font-medium text-slate-800">{activity.action}</p>
-                                <p className="text-xs text-slate-500">{activity.target_type} ID: {activity.target_id}</p>
+                                <p className="text-xs text-slate-500">
+                                    {activity.patient_name ? activity.patient_name : `${activity.target_type} ID: ${activity.target_id}`}
+                                </p>
                             </div>
                             <span className="text-xs text-slate-400">{formatTime(activity.timestamp)}</span>
                         </div>

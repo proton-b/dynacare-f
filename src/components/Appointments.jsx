@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { appointmentService } from '../services/api'
 import ScheduleAppointmentModal from './modals/ScheduleAppointmentModal'
 
 const Appointments = () => {
+  const navigate = useNavigate()
   const [currentDate, setCurrentDate] = useState(new Date())
   const [view, setView] = useState('week') // 'week' or 'month'
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false)
   const [appointments, setAppointments] = useState([])
+  const [filterModal, setFilterModal] = useState(null) // null, 'today', 'week', or 'month'
   const [stats, setStats] = useState([
     { label: 'Today', value: 0, key: 'today', color: 'bg-blue-50', iconColor: 'text-blue-600' },
     { label: 'This Week', value: 0, key: 'week', color: 'bg-green-50', iconColor: 'text-green-600' },
-    { label: 'Pending', value: 0, key: 'pending', color: 'bg-amber-50', iconColor: 'text-amber-600' },
     { label: 'This Month', value: 0, key: 'month', color: 'bg-emerald-50', iconColor: 'text-emerald-600' },
   ])
 
@@ -23,11 +25,6 @@ const Appointments = () => {
     week: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-      </svg>
-    ),
-    pending: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     ),
     month: (
@@ -53,7 +50,6 @@ const Appointments = () => {
       setStats([
         { label: 'Today', value: data.today, key: 'today', color: 'bg-blue-50', iconColor: 'text-blue-600' },
         { label: 'This Week', value: data.week, key: 'week', color: 'bg-green-50', iconColor: 'text-green-600' },
-        { label: 'Pending', value: data.pending, key: 'pending', color: 'bg-amber-50', iconColor: 'text-amber-600' },
         { label: 'This Month', value: data.month, key: 'month', color: 'bg-emerald-50', iconColor: 'text-emerald-600' },
       ])
     } catch (err) {
@@ -98,10 +94,12 @@ const Appointments = () => {
     const newDate = new Date(currentDate)
     newDate.setDate(currentDate.getDate() + (direction === 'next' ? 7 : -7))
     setCurrentDate(newDate)
+    setFilterModal(null)
   }
 
   const goToToday = () => {
     setCurrentDate(new Date())
+    setFilterModal(null)
   }
 
   const handleScheduleResult = (result) => {
@@ -111,11 +109,18 @@ const Appointments = () => {
     setIsAppointmentModalOpen(false)
   }
 
+  // Parse appointment date as local time (strip trailing Z to avoid UTC conversion)
+  const parseLocalDate = (dateStr) => {
+    if (!dateStr) return new Date()
+    const str = typeof dateStr === 'string' ? dateStr.replace('Z', '') : dateStr
+    return new Date(str)
+  }
+
   // Get appointments for a specific day and 30-min time slot
   const getAppointmentsForSlot = (day, timeSlot) => {
     const [slotHour, slotMin] = timeSlot.split(':').map(Number)
     return appointments.filter(appt => {
-      const apptDate = new Date(appt.appointment_date)
+      const apptDate = parseLocalDate(appt.appointment_date)
       if (
         apptDate.getFullYear() !== day.getFullYear() ||
         apptDate.getMonth() !== day.getMonth() ||
@@ -132,7 +137,7 @@ const Appointments = () => {
   // Get today's appointments for sidebar
   const todayAppointments = appointments
     .filter(appt => {
-      const apptDate = new Date(appt.appointment_date)
+      const apptDate = parseLocalDate(appt.appointment_date)
       const today = new Date()
       return (
         apptDate.getFullYear() === today.getFullYear() &&
@@ -140,7 +145,7 @@ const Appointments = () => {
         apptDate.getDate() === today.getDate()
       )
     })
-    .sort((a, b) => new Date(a.appointment_date) - new Date(b.appointment_date))
+    .sort((a, b) => parseLocalDate(a.appointment_date) - parseLocalDate(b.appointment_date))
 
   const statusColors = {
     'Scheduled': 'bg-blue-100 border-blue-300 text-blue-800',
@@ -169,9 +174,13 @@ const Appointments = () => {
       {/* Content */}
       <div className="px-8 py-6">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           {stats.map((stat, index) => (
-            <div key={index} className="bg-white rounded-xl p-5 border border-slate-200">
+            <div
+              key={index}
+              onClick={() => setFilterModal(stat.key)}
+              className={`bg-white rounded-xl p-5 border transition-all cursor-pointer hover:shadow-md hover:border-blue-300 ${filterModal === stat.key ? 'border-blue-400 ring-2 ring-blue-100' : 'border-slate-200'}`}
+            >
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">{stat.label}</p>
@@ -293,7 +302,7 @@ const Appointments = () => {
                           }}
                         >
                           {slotAppointments.map(appt => {
-                            const apptTime = new Date(appt.appointment_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+                            const apptTime = parseLocalDate(appt.appointment_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
                             return (
                               <div
                                 key={appt.id}
@@ -331,10 +340,14 @@ const Appointments = () => {
             ) : (
               <div className="space-y-3">
                 {todayAppointments.map(appt => {
-                  const apptDate = new Date(appt.appointment_date)
+                  const apptDate = parseLocalDate(appt.appointment_date)
                   const timeStr = apptDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
                   return (
-                    <div key={appt.id} className="p-4 rounded-lg border border-slate-200 hover:shadow-md transition-shadow">
+                    <div
+                      key={appt.id}
+                      onClick={() => navigate(`/patients?patientId=${appt.patient_id}`)}
+                      className="p-4 rounded-lg border border-slate-200 hover:shadow-md hover:border-primary-200 transition-all cursor-pointer"
+                    >
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-bold text-slate-800">{appt.patient_name}</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[appt.status] || 'bg-blue-100 text-blue-800'}`}>
@@ -360,6 +373,115 @@ const Appointments = () => {
           </div>
         </div>
       </div>
+
+      {/* Filtered Appointments Modal */}
+      {filterModal && (() => {
+        const now = new Date()
+        const modalTitles = {
+          today: "Today's Appointments",
+          week: "This Week's Appointments",
+          month: "This Month's Appointments",
+        }
+
+        const filtered = appointments.filter(appt => {
+          const apptDate = parseLocalDate(appt.appointment_date)
+          if (filterModal === 'today') {
+            return (
+              apptDate.getFullYear() === now.getFullYear() &&
+              apptDate.getMonth() === now.getMonth() &&
+              apptDate.getDate() === now.getDate()
+            )
+          }
+          if (filterModal === 'week') {
+            const startOfWeek = new Date(now)
+            const day = startOfWeek.getDay()
+            const diff = day === 0 ? -6 : 1 - day
+            startOfWeek.setDate(startOfWeek.getDate() + diff)
+            startOfWeek.setHours(0, 0, 0, 0)
+            const endOfWeek = new Date(startOfWeek)
+            endOfWeek.setDate(startOfWeek.getDate() + 7)
+            return apptDate >= startOfWeek && apptDate < endOfWeek
+          }
+          if (filterModal === 'month') {
+            return (
+              apptDate.getFullYear() === now.getFullYear() &&
+              apptDate.getMonth() === now.getMonth()
+            )
+          }
+          return false
+        }).sort((a, b) => parseLocalDate(a.appointment_date) - parseLocalDate(b.appointment_date))
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4">
+            <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden max-h-[80vh] flex flex-col">
+              <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between shrink-0">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-800">{modalTitles[filterModal]}</h2>
+                  <p className="text-sm text-slate-500 mt-0.5">{filtered.length} appointment{filtered.length !== 1 ? 's' : ''}</p>
+                </div>
+                <button
+                  onClick={() => setFilterModal(null)}
+                  className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                >
+                  <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="p-6 overflow-y-auto">
+                {filtered.length === 0 ? (
+                  <div className="py-12 text-center">
+                    <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                      <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <p className="text-slate-500 text-sm">No appointments found</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filtered.map(appt => {
+                      const apptDate = parseLocalDate(appt.appointment_date)
+                      const timeStr = apptDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+                      const dateStr = apptDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                      return (
+                        <div key={appt.id} className="p-4 rounded-xl border border-slate-200 hover:shadow-md transition-shadow">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-bold text-slate-800">{appt.patient_name}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[appt.status] || 'bg-blue-100 text-blue-800'}`}>
+                              {appt.status}
+                            </span>
+                          </div>
+                          <div className="flex items-center flex-wrap gap-x-2 gap-y-1 text-xs text-slate-500">
+                            <span className="flex items-center space-x-1">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              <span>{dateStr}</span>
+                            </span>
+                            <span className="text-slate-300">|</span>
+                            <span className="flex items-center space-x-1">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              <span>{timeStr}</span>
+                            </span>
+                            <span className="text-slate-300">|</span>
+                            <span>{appt.duration || 60} min</span>
+                          </div>
+                          {appt.type && (
+                            <div className="mt-2 text-xs font-medium text-slate-500 bg-slate-50 inline-block px-2 py-0.5 rounded">{appt.type}</div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Appointment Modal */}
       <ScheduleAppointmentModal

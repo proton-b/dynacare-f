@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { noteService, aiService, imageService } from '../services/api'
+import { noteService, aiService, imageService, patientService } from '../services/api'
 import ImageAnnotationOverlay from './ImageAnnotationOverlay'
 
 const API_URL = import.meta.env.VITE_BACKEND_URL
@@ -21,12 +21,19 @@ const SessionNotes = () => {
     const [isImagePickerOpen, setIsImagePickerOpen] = useState(false)
     const [charCount, setCharCount] = useState(0)
     const [annotationOverlay, setAnnotationOverlay] = useState(null)
+    const [patients, setPatients] = useState([])
+    const [selectedPatientId, setSelectedPatientId] = useState(location.state?.patientId || '')
+    const [savedNotes, setSavedNotes] = useState([])
+    const [notesLoading, setNotesLoading] = useState(false)
+    const [viewingNote, setViewingNote] = useState(null)
+    const [exportFormat, setExportFormat] = useState('PDF')
 
     const editorRef = useRef(null)
     const savedSelectionRef = useRef(null)
 
     const getImageUrl = (imageUrl) => {
         if (!imageUrl) return ''
+        if (imageUrl.startsWith('http')) return imageUrl
         const baseUrl = API_URL.replace('/api', '')
         return `${baseUrl}${imageUrl}`
     }
@@ -41,6 +48,21 @@ const SessionNotes = () => {
             }
         }
         fetchLibraryImages()
+
+        const fetchPatients = async () => {
+            try {
+                const response = await patientService.getAll()
+                const data = Array.isArray(response.data) ? response.data : []
+                setPatients(data)
+                if (!selectedPatientId && data.length > 0) {
+                    setSelectedPatientId(String(data[0].id))
+                }
+            } catch (error) {
+                console.error('Error fetching patients:', error)
+            }
+        }
+        fetchPatients()
+        fetchSavedNotes()
     }, [])
 
     // Save cursor position before opening image picker
@@ -183,9 +205,12 @@ const SessionNotes = () => {
     useEffect(() => {
         const editor = editorRef.current
         if (!editor) return
+        if (noteContent && !editor.innerHTML) {
+            editor.innerHTML = noteContent
+        }
         editor.addEventListener('click', handleEditorClick)
         return () => editor.removeEventListener('click', handleEditorClick)
-    }, [handleEditorClick])
+    }, [handleEditorClick, activeTab])
 
     // Save annotations back into the editor DOM
     const handleAnnotationSave = useCallback((annotations) => {
@@ -495,9 +520,26 @@ const SessionNotes = () => {
         setIsTemplatesOpen(false);
     }
 
+    const fetchSavedNotes = async () => {
+        setNotesLoading(true)
+        try {
+            const response = await noteService.getAll()
+            setSavedNotes(response.data || [])
+        } catch (err) {
+            console.error('Error fetching saved notes:', err)
+        } finally {
+            setNotesLoading(false)
+        }
+    }
+
     const handleSaveNote = async () => {
         const content = getEditorContent()
         const textContent = getEditorTextContent()
+
+        if (!selectedPatientId) {
+            alert("Please select a patient before saving.");
+            return;
+        }
 
         if (!textContent.trim()) {
             alert("Please enter some content before saving.");
@@ -507,7 +549,7 @@ const SessionNotes = () => {
         setIsSaving(true);
         try {
             const noteData = {
-                patient_id: location.state?.patientId || 1,
+                patient_id: parseInt(selectedPatientId),
                 appointment_id: location.state?.appointmentId || null,
                 content: content,
                 status: 'Finalized',
@@ -515,12 +557,76 @@ const SessionNotes = () => {
             };
 
             await noteService.create(noteData);
+            fetchSavedNotes();
             alert("Note saved and finalized successfully!");
         } catch (error) {
             console.error("Error saving note:", error);
             alert("Failed to save note: " + (error.response?.data?.message || error.message));
         } finally {
             setIsSaving(false);
+        }
+    }
+
+    const handleDownloadExport = () => {
+        const content = noteContent || getEditorContent()
+        const textContent = content?.replace(/<[^>]*>/g, '') || ''
+        if (!textContent.trim()) {
+            alert('No content to export. Please write some notes first.')
+            return
+        }
+
+        const patientName = patients.find(p => String(p.id) === String(selectedPatientId))?.full_name || 'Unknown'
+        const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+
+        if (exportFormat === 'PDF') {
+            const printWindow = window.open('', '_blank')
+            printWindow.document.write(`
+                <html>
+                <head>
+                    <title>Session Notes - ${patientName}</title>
+                    <style>
+                        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 40px; color: #1e293b; line-height: 1.7; }
+                        h1 { font-size: 22px; margin-bottom: 4px; }
+                        .meta { color: #64748b; font-size: 13px; margin-bottom: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 16px; }
+                        .content { font-size: 15px; }
+                        .content h1, .content h2, .content h3 { margin-top: 20px; }
+                        .content ul, .content ol { padding-left: 20px; }
+                        .content img { max-width: 100%; }
+                        @media print { body { padding: 20px; } }
+                    </style>
+                </head>
+                <body>
+                    <h1>Session Notes</h1>
+                    <div class="meta">
+                        <strong>Patient:</strong> ${patientName} &nbsp;&bull;&nbsp;
+                        <strong>Date:</strong> ${dateStr} &nbsp;&bull;&nbsp;
+                        <strong>Status:</strong> Finalized
+                    </div>
+                    <div class="content">${content}</div>
+                </body>
+                </html>
+            `)
+            printWindow.document.close()
+            printWindow.print()
+        } else if (exportFormat === 'Word') {
+            const html = `
+                <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+                <head><meta charset="utf-8"><title>Session Notes</title></head>
+                <body>
+                    <h1>Session Notes</h1>
+                    <p><strong>Patient:</strong> ${patientName} | <strong>Date:</strong> ${dateStr}</p>
+                    <hr>
+                    ${content}
+                </body>
+                </html>
+            `
+            const blob = new Blob([html], { type: 'application/msword' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `Session_Notes_${patientName.replace(/\s+/g, '_')}_${dateStr.replace(/\s+/g, '_')}.doc`
+            a.click()
+            URL.revokeObjectURL(url)
         }
     }
 
@@ -669,12 +775,27 @@ const SessionNotes = () => {
                             <h1 className="text-3xl font-bold text-slate-800 font-display">Session Notes</h1>
                             <p className="text-slate-500 mt-1">Create comprehensive clinical documentation with AI-assisted analysis</p>
                         </div>
-                        <button className="px-4 py-2 bg-white border-2 border-slate-300 text-slate-700 rounded-lg font-semibold hover:bg-slate-50 transition-colors flex items-center space-x-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <span>Schedule Follow-up</span>
-                        </button>
+                        <div className="flex items-center space-x-3">
+                            <div className="flex items-center space-x-2">
+                                <label className="text-sm font-medium text-slate-600">Patient:</label>
+                                <select
+                                    value={selectedPatientId}
+                                    onChange={(e) => setSelectedPatientId(e.target.value)}
+                                    className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 min-w-[180px]"
+                                >
+                                    <option value="">Select patient</option>
+                                    {patients.length > 0 ? patients.map(p => (
+                                        <option key={p.id} value={String(p.id)}>{p.full_name}</option>
+                                    )) : <option disabled>Loading...</option>}
+                                </select>
+                            </div>
+                            <button className="px-4 py-2 bg-white border-2 border-slate-300 text-slate-700 rounded-lg font-semibold hover:bg-slate-50 transition-colors flex items-center space-x-2">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                <span>Schedule Follow-up</span>
+                            </button>
+                        </div>
                     </div>
                 </header>
             )}
@@ -727,9 +848,9 @@ const SessionNotes = () => {
                                                         onClick={() => setIsTemplatesOpen(!isTemplatesOpen)}
                                                         className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center space-x-1 px-3 py-1 hover:bg-primary-50 rounded-lg transition-colors border border-primary-100"
                                                     >
-                                                        <span>📋</span>
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                                         <span>Templates</span>
-                                                        <span className="text-[10px] ml-1">{isTemplatesOpen ? '▲' : '▼'}</span>
+                                                        <svg className={`w-3 h-3 ml-1 transition-transform ${isTemplatesOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
                                                     </button>
                                                     <div className={`absolute right-0 top-full mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl transition-all z-20 overflow-hidden ${isTemplatesOpen ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-2 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto'}`}>
                                                         {templateOptions.map(t => (
@@ -753,7 +874,7 @@ const SessionNotes = () => {
                                                 >
                                                     {isSymptomReportLoading ? (
                                                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                                    ) : '🔍'}
+                                                    ) : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>}
                                                     <span>{isSymptomReportLoading ? 'Analyzing...' : 'Symptoms Report'}</span>
                                                 </button>
                                                 <button
@@ -763,7 +884,7 @@ const SessionNotes = () => {
                                                 >
                                                     {isSaving ? (
                                                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                                    ) : '💾'}
+                                                    ) : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>}
                                                     <span>{isSaving ? 'Saving...' : 'Save'}</span>
                                                 </button>
                                             </div>
@@ -881,7 +1002,7 @@ const SessionNotes = () => {
                                     <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                                         <div className="flex items-start space-x-3">
                                             <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
-                                                <span className="text-white">✨</span>
+                                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                                             </div>
                                             <div className="flex-1">
                                                 <h4 className="font-semibold text-slate-800 mb-1">AI Writing Assistant</h4>
@@ -964,7 +1085,7 @@ const SessionNotes = () => {
                                             {symptomReport && (
                                                 <div className="p-6 bg-indigo-50 border border-indigo-200 rounded-lg animate-in fade-in slide-in-from-top-4 duration-500">
                                                     <h3 className="font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                                                        <span>🔍</span>
+                                                        <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                                                         <span>AI-Detected Symptoms Report</span>
                                                     </h3>
                                                     <div className="mb-4 p-4 bg-white/60 rounded-lg border border-indigo-100 italic text-slate-700">
@@ -1014,7 +1135,7 @@ const SessionNotes = () => {
                                                         }}
                                                         className="mt-6 w-full py-3 bg-white border-2 border-indigo-200 text-indigo-700 font-bold rounded-xl hover:bg-indigo-50 transition-colors flex items-center justify-center space-x-2"
                                                     >
-                                                        <span>📋</span>
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                                         <span>Append Report to Notes</span>
                                                     </button>
                                                 </div>
@@ -1091,7 +1212,7 @@ const SessionNotes = () => {
                                                     }}
                                                     className="px-4 py-2 bg-primary-50 text-primary-600 rounded-lg font-bold hover:bg-primary-100 transition-all flex items-center space-x-2"
                                                 >
-                                                    <span>📋</span>
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
                                                     <span>Copy to Notes</span>
                                                 </button>
                                             </div>
@@ -1147,7 +1268,7 @@ const SessionNotes = () => {
 
                                             <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-xl p-5">
                                                 <div className="flex items-center justify-between mb-3">
-                                                    <span className="text-2xl">🧠</span>
+                                                    <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                                                     <span className="text-xs font-semibold px-2 py-1 bg-purple-200 text-purple-700 rounded-full">N/A</span>
                                                 </div>
                                                 <h4 className="font-bold text-slate-800 mb-1">GAD-7 Score</h4>
@@ -1181,7 +1302,7 @@ const SessionNotes = () => {
                                         {/* Available Assessments */}
                                         <div className="bg-white border border-slate-200 rounded-xl p-6">
                                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                                                <span>📋</span>
+                                                <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
                                                 <span>Available Assessments</span>
                                             </h3>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1263,82 +1384,54 @@ const SessionNotes = () => {
                             {activeTab === 'history' && (
                                 <div className="p-6">
                                     <div className="space-y-6">
-                                        {/* Search and Filter */}
                                         <div className="flex items-center justify-between">
-                                            <div className="relative flex-1 max-w-md">
-                                                <input
-                                                    type="text"
-                                                    placeholder="Search past notes..."
-                                                    className="w-full pl-10 pr-4 py-2.5 border-2 border-slate-200 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-100 outline-none"
-                                                />
-                                                <svg className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                                </svg>
-                                            </div>
-                                            <div className="flex items-center space-x-3">
-                                                <select className="px-4 py-2.5 border-2 border-slate-200 rounded-lg focus:border-primary-500 outline-none text-sm">
-                                                    <option>All Types</option>
-                                                    <option>Follow-up</option>
-                                                    <option>Initial</option>
-                                                    <option>Crisis</option>
-                                                </select>
-                                                <select className="px-4 py-2.5 border-2 border-slate-200 rounded-lg focus:border-primary-500 outline-none text-sm">
-                                                    <option>Last 30 days</option>
-                                                    <option>Last 90 days</option>
-                                                    <option>Last 6 months</option>
-                                                    <option>All time</option>
-                                                </select>
-                                            </div>
+                                            <h3 className="text-lg font-bold text-slate-800">Saved Notes</h3>
+                                            <span className="text-sm text-slate-500">{savedNotes.length} note{savedNotes.length !== 1 ? 's' : ''}</span>
                                         </div>
 
-                                        {/* Timeline */}
-                                        <div className="relative">
-                                            <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-slate-200"></div>
-                                            <div className="space-y-6">
-                                                {[]
-                                                    .map((session, index) => (
-                                                        <div key={index} className="relative pl-16">
-                                                            <div className={`absolute left-4 w-5 h-5 rounded-full border-4 border-white ${session.type === 'Crisis' ? 'bg-red-500' : session.type === 'Initial' ? 'bg-purple-500' : 'bg-primary-500'}`}></div>
-                                                            <div className="bg-white border border-slate-200 rounded-xl p-6 hover:shadow-lg transition-shadow">
-                                                                <div className="flex items-start justify-between mb-4">
-                                                                    <div>
-                                                                        <div className="flex items-center space-x-3 mb-1">
-                                                                            <span className="font-bold text-slate-800">{session.date}</span>
-                                                                            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${session.type === 'Crisis' ? 'bg-red-100 text-red-700' : session.type === 'Initial' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                                                                                {session.type}
-                                                                            </span>
-                                                                        </div>
-                                                                        <span className="text-sm text-slate-500">{session.duration}</span>
-                                                                    </div>
-                                                                    <button className="text-primary-600 hover:text-primary-700 text-sm font-medium">
-                                                                        View Full Note
-                                                                    </button>
-                                                                </div>
-                                                                <p className="text-slate-600 mb-4 leading-relaxed">{session.summary}</p>
-                                                                <div className="flex items-center justify-between">
-                                                                    <div className="flex flex-wrap gap-2">
-                                                                        {session.topics.map((topic, i) => (
-                                                                            <span key={i} className="text-xs font-medium px-2.5 py-1 bg-slate-100 text-slate-600 rounded-full">
-                                                                                {topic}
-                                                                            </span>
-                                                                        ))}
-                                                                    </div>
-                                                                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${session.mood === 'Positive' ? 'bg-green-100 text-green-700' : session.mood === 'Distressed' ? 'bg-red-100 text-red-700' : session.mood === 'Anxious' ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                                        Mood: {session.mood}
+                                        {notesLoading ? (
+                                            <div className="space-y-4 animate-pulse">
+                                                {[1, 2, 3].map(i => <div key={i} className="h-24 bg-slate-100 rounded-xl"></div>)}
+                                            </div>
+                                        ) : savedNotes.length === 0 ? (
+                                            <div className="py-12 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                                <svg className="w-12 h-12 text-slate-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                </svg>
+                                                <p className="text-slate-500 font-medium">No saved notes yet</p>
+                                                <p className="text-sm text-slate-400 mt-1">Notes you save will appear here</p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                {savedNotes.map(note => {
+                                                    const noteDate = new Date(note.created_at)
+                                                    const dateStr = noteDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                                                    const timeStr = noteDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+                                                    const plainText = note.content?.replace(/<[^>]*>/g, '') || ''
+                                                    const preview = plainText.length > 150 ? plainText.substring(0, 150) + '...' : plainText
+                                                    return (
+                                                        <div
+                                                            key={note.id}
+                                                            className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md transition-shadow cursor-pointer"
+                                                            onClick={() => setViewingNote(note)}
+                                                        >
+                                                            <div className="flex items-start justify-between mb-2">
+                                                                <div className="flex items-center space-x-3">
+                                                                    <span className="text-sm font-bold text-slate-800">{note.patient_name || 'Unknown Patient'}</span>
+                                                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${note.status === 'Finalized' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                                        {note.status}
                                                                     </span>
                                                                 </div>
+                                                                <div className="text-xs text-slate-400">
+                                                                    {dateStr} at {timeStr}
+                                                                </div>
                                                             </div>
+                                                            <p className="text-sm text-slate-600 leading-relaxed">{preview}</p>
                                                         </div>
-                                                    ))}
+                                                    )
+                                                })}
                                             </div>
-                                        </div>
-
-                                        {/* Load More */}
-                                        <div className="text-center">
-                                            <button className="px-6 py-2.5 border-2 border-slate-200 text-slate-600 rounded-lg font-medium hover:bg-slate-50 transition-colors">
-                                                Load More Sessions
-                                            </button>
-                                        </div>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -1354,16 +1447,15 @@ const SessionNotes = () => {
                                                 </svg>
                                                 <span>Export Format</span>
                                             </h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 {[
-                                                    { format: 'PDF', color: 'text-red-500 bg-red-50', description: 'Professional clinical report format', recommended: true },
-                                                    { format: 'Word', color: 'text-blue-500 bg-blue-50', description: 'Editable document format (.docx)', recommended: false },
-                                                    { format: 'CSV', color: 'text-green-500 bg-green-50', description: 'Data export for analysis', recommended: false }
+                                                    { format: 'PDF', color: 'text-red-500 bg-red-50', description: 'Professional clinical report format' },
+                                                    { format: 'Word', color: 'text-blue-500 bg-blue-50', description: 'Editable document format (.doc)' }
                                                 ].map((option, index) => (
-                                                    <button key={index} className={`relative p-6 rounded-xl border-2 text-left transition-all hover:shadow-md ${option.recommended ? 'border-primary-500 bg-primary-50' : 'border-slate-200 hover:border-slate-300'}`}>
-                                                        {option.recommended && (
+                                                    <button key={index} onClick={() => setExportFormat(option.format)} className={`relative p-6 rounded-xl border-2 text-left transition-all hover:shadow-md ${exportFormat === option.format ? 'border-primary-500 bg-primary-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                                                        {exportFormat === option.format && (
                                                             <span className="absolute -top-2 right-4 text-xs font-semibold px-2 py-0.5 bg-primary-600 text-white rounded-full">
-                                                                Recommended
+                                                                Selected
                                                             </span>
                                                         )}
                                                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-3 ${option.color}`}>
@@ -1381,7 +1473,7 @@ const SessionNotes = () => {
                                         {/* Content Selection */}
                                         <div className="bg-white border border-slate-200 rounded-xl p-6">
                                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                                                <span>📋</span>
+                                                <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                                 <span>Include in Export</span>
                                             </h3>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1401,28 +1493,10 @@ const SessionNotes = () => {
                                             </div>
                                         </div>
 
-                                        {/* Date Range */}
-                                        <div className="bg-white border border-slate-200 rounded-xl p-6">
-                                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                                                <span>📅</span>
-                                                <span>Date Range</span>
-                                            </h3>
-                                            <div className="flex items-center space-x-4">
-                                                <div className="flex-1">
-                                                    <label className="block text-sm font-medium text-slate-600 mb-2">From</label>
-                                                    <input type="date" defaultValue="2025-12-01" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-lg focus:border-primary-500 outline-none" />
-                                                </div>
-                                                <div className="flex-1">
-                                                    <label className="block text-sm font-medium text-slate-600 mb-2">To</label>
-                                                    <input type="date" defaultValue="2026-01-13" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-lg focus:border-primary-500 outline-none" />
-                                                </div>
-                                            </div>
-                                        </div>
-
                                         {/* Privacy Options */}
                                         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
                                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                                                <span>🔒</span>
+                                                <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                                                 <span>Privacy & Compliance</span>
                                             </h3>
                                             <div className="space-y-3">
@@ -1445,13 +1519,13 @@ const SessionNotes = () => {
                                         <div className="flex items-center justify-between p-6 bg-slate-50 rounded-xl">
                                             <div>
                                                 <p className="font-semibold text-slate-800">Ready to export</p>
-                                                <p className="text-sm text-slate-500">4 sessions • PDF format • 12 pages estimated</p>
+                                                <p className="text-sm text-slate-500">{exportFormat} format</p>
                                             </div>
-                                            <button className="btn-primary px-8 py-3 flex items-center space-x-2">
+                                            <button onClick={handleDownloadExport} className="btn-primary px-8 py-3 flex items-center space-x-2">
                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                                                 </svg>
-                                                <span>Generate Export</span>
+                                                <span>Download</span>
                                             </button>
                                         </div>
                                     </div>
@@ -1465,7 +1539,10 @@ const SessionNotes = () => {
                         {/* Templates */}
                         <div className="bg-white rounded-xl border border-slate-200 p-6">
                             <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-lg font-bold text-slate-800">📋 Templates</h3>
+                                <h3 className="text-lg font-bold text-slate-800 flex items-center space-x-2">
+                                    <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                    <span>Templates</span>
+                                </h3>
                             </div>
                             <div className="space-y-2">
                                 {templateOptions.map(template => (
@@ -1540,6 +1617,64 @@ const SessionNotes = () => {
                     onClose={() => setAnnotationOverlay(null)}
                 />
             )}
+
+            {/* View Note Modal */}
+            {viewingNote && (() => {
+                const noteDate = new Date(viewingNote.created_at)
+                const dateStr = noteDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                const timeStr = noteDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4">
+                        <div className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col">
+                            {/* Header */}
+                            <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between shrink-0">
+                                <div>
+                                    <div className="flex items-center space-x-3 mb-1">
+                                        <h2 className="text-xl font-bold text-slate-800">{viewingNote.patient_name || 'Unknown Patient'}</h2>
+                                        <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${viewingNote.status === 'Finalized' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                            {viewingNote.status}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-slate-500">{dateStr} at {timeStr}</p>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    {/* <button
+                                        onClick={() => {
+                                            if (editorRef.current) {
+                                                editorRef.current.innerHTML = viewingNote.content
+                                                setNoteContent(viewingNote.content)
+                                            }
+                                            setViewingNote(null)
+                                            setActiveTab('editor')
+                                        }}
+                                        className="px-3 py-2 text-sm font-semibold text-primary-600 hover:bg-primary-50 rounded-lg transition-colors flex items-center space-x-1.5"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                        <span>Edit in Editor</span>
+                                    </button> */}
+                                    <button
+                                        onClick={() => setViewingNote(null)}
+                                        className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                                    >
+                                        <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            {/* Content */}
+                            <div className="p-6 overflow-y-auto">
+                                <div
+                                    className="prose prose-slate max-w-none text-slate-700 leading-relaxed"
+                                    dangerouslySetInnerHTML={{ __html: viewingNote.content }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )
+            })()}
         </div>
     )
 }
