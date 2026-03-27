@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { authService } from '../services/api';
@@ -16,10 +16,11 @@ const Login = () => {
     const navigate = useNavigate();
     const token = localStorage.getItem('token');
 
-    if (user && token) {
-        navigate('/dashboard', { replace: true });
-        return null;
-    }
+    useEffect(() => {
+        if (user && token) {
+            navigate('/dashboard', { replace: true });
+        }
+    }, [user, token, navigate]);
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;

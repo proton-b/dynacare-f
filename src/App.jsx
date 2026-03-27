@@ -1,5 +1,5 @@
 import React from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import Dashboard from './components/Dashboard'
 import Appointments from './components/Appointments'
@@ -21,22 +21,21 @@ function App() {
         <AuthProvider>
             <BrowserRouter>
                 <Routes>
-                    <Route path="/" element={<Login />} />
                     <Route path="/login" element={<Login />} />
                     <Route path="/signup" element={<Signup />} />
 
-                    <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-                        <Route index element={<Dashboard />} />
+                    <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+                        <Route path="/dashboard" element={<Dashboard />} />
+                        <Route path="/appointments" element={<Appointments />} />
+                        <Route path="/patients" element={<PatientProfile />} />
+                        <Route path="/notes" element={<SessionNotes />} />
+                        <Route path="/recording" element={<SessionRecording />} />
+                        <Route path="/journals" element={<Journals />} />
+                        <Route path="/journals/dsm-5" element={<DSM5Reference />} />
+                        <Route path="/settings" element={<Settings />} />
                     </Route>
-                    <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-                        <Route path="appointments" element={<Appointments />} />
-                        <Route path="patients" element={<PatientProfile />} />
-                        <Route path="notes" element={<SessionNotes />} />
-                        <Route path="recording" element={<SessionRecording />} />
-                        <Route path="journals" element={<Journals />} />
-                        <Route path="journals/dsm-5" element={<DSM5Reference />} />
-                        <Route path="settings" element={<Settings />} />
-                    </Route>
+
+                    <Route path="*" element={<Navigate to="/login" replace />} />
                 </Routes>
             </BrowserRouter>
         </AuthProvider>
