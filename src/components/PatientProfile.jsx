@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { patientService, clinicalService, noteService, recordingService } from '../services/api'
 import EditPatientModal from './modals/EditPatientModal'
+import ScheduleAppointmentModal from './modals/ScheduleAppointmentModal'
 import SessionDetailsModal from './modals/SessionDetailsModal'
 
 const API_URL = import.meta.env.VITE_BACKEND_URL
@@ -20,6 +21,7 @@ const PatientProfile = () => {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
     const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+    const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false)
     const [statusFilter, setStatusFilter] = useState(searchParams.get('filter') || 'all')
 
     // Clinical states
@@ -441,7 +443,10 @@ const PatientProfile = () => {
                             </svg>
                             <span>Edit Profile</span>
                         </button>
-                        <button className="px-4 py-2 bg-white border-2 border-slate-300 text-slate-700 rounded-lg font-semibold hover:bg-slate-50 transition-colors flex items-center space-x-2">
+                        <button
+                            onClick={() => setIsScheduleModalOpen(true)}
+                            className="px-4 py-2 bg-white border-2 border-slate-300 text-slate-700 rounded-lg font-semibold hover:bg-slate-50 transition-colors flex items-center space-x-2"
+                        >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
@@ -872,7 +877,7 @@ const PatientProfile = () => {
                             </div>
                         </div>
 
-                        {/* Treatment Progress Chart */}
+                        {/* Treatment Progress Chart - commented out
                         <div className="bg-white rounded-xl border border-slate-200 p-6">
                             <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center space-x-2">
                                 <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -881,12 +886,10 @@ const PatientProfile = () => {
                                 <span>Treatment Progress</span>
                             </h3>
 
-                            {/* Chart Placeholder */}
                             <div className="h-64 bg-slate-50 rounded-lg border border-slate-200 flex items-center justify-center mb-6">
                                 <p className="text-slate-400">Chart visualization linked to patient telemetry</p>
                             </div>
 
-                            {/* Metrics */}
                             <div className="grid grid-cols-3 gap-6">
                                 <div className="text-center">
                                     <div className="flex items-center justify-center space-x-2 mb-2">
@@ -914,6 +917,7 @@ const PatientProfile = () => {
                                 </div>
                             </div>
                         </div>
+                        */}
                     </div>
 
                     {/* Sidebar - Right Side (1/3) */}
@@ -922,7 +926,7 @@ const PatientProfile = () => {
                         <div className="bg-white rounded-xl border border-slate-200 p-6">
                             <div className="flex items-center justify-between mb-4">
                                 <h3 className="text-lg font-bold text-slate-800">Contact Information</h3>
-                                <button className="text-sm text-primary-600 hover:text-primary-700 flex items-center space-x-1">
+                                <button onClick={() => setIsEditModalOpen(true)} className="text-sm text-primary-600 hover:text-primary-700 flex items-center space-x-1">
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                     </svg>
@@ -992,6 +996,11 @@ const PatientProfile = () => {
                     setPatient(updated);
                     // Also refresh other data if needed
                 }}
+            />
+            <ScheduleAppointmentModal
+                isOpen={isScheduleModalOpen}
+                onClose={() => setIsScheduleModalOpen(false)}
+                onAppointmentScheduled={() => setIsScheduleModalOpen(false)}
             />
             <SessionDetailsModal
                 isOpen={isSessionDetailsOpen}

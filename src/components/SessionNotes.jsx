@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { noteService, aiService, imageService, patientService } from '../services/api'
+import { noteService, aiService, imageService, patientService, recordingService } from '../services/api'
 import ImageAnnotationOverlay from './ImageAnnotationOverlay'
+import { exportClinicalSummaryToPDF } from '../utils/pdfExport'
 
 const API_URL = import.meta.env.VITE_BACKEND_URL
 
@@ -15,6 +16,7 @@ const SessionNotes = () => {
     const [aiSummary, setAiSummary] = useState(null)
     const [isFullScreen, setIsFullScreen] = useState(false)
     const [isSaving, setIsSaving] = useState(false)
+    const [showClearConfirm, setShowClearConfirm] = useState(false)
     const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
     const [isSymptomReportLoading, setIsSymptomReportLoading] = useState(false)
     const [symptomReport, setSymptomReport] = useState(null)
@@ -29,8 +31,20 @@ const SessionNotes = () => {
     const [viewingNote, setViewingNote] = useState(null)
     const [exportFormat, setExportFormat] = useState('PDF')
 
+    // Upload audio states
+    const [uploadFile, setUploadFile] = useState(null)
+    const [uploading, setUploading] = useState(false)
+    const [uploadError, setUploadError] = useState('')
+    const [uploadProgress, setUploadProgress] = useState(0)
+    const [uploadStep, setUploadStep] = useState('')
+    const [clinicalSummary, setClinicalSummary] = useState(null)
+    const [showSummaryModal, setShowSummaryModal] = useState(false)
+    const [generatingSummary, setGeneratingSummary] = useState(false)
+
     const editorRef = useRef(null)
     const savedSelectionRef = useRef(null)
+    const fileInputRef = useRef(null)
+    const noteViewContentRef = useRef(null)
 
     const getImageUrl = (imageUrl) => {
         if (!imageUrl) return ''
@@ -235,11 +249,15 @@ const SessionNotes = () => {
         // Get a clean img element (clone to strip from old parent)
         const cleanImg = img.cloneNode(true)
         cleanImg.style.cssText = 'display:block;max-width:100%;max-height:400px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer;'
-        cleanImg.title = 'Click to add labels'
+        cleanImg.title = ''
 
-        // Remove the old overlay if it exists
+        // Remove the old overlay and legend if they exist
         if (existingOverlay) {
             existingOverlay.remove()
+        }
+        const existingLegend = wrapper.querySelector('.annotation-legend')
+        if (existingLegend) {
+            existingLegend.remove()
         }
         // Remove the old bare img if it's still directly in wrapper
         const remainingImg = wrapper.querySelector('img')
@@ -248,8 +266,10 @@ const SessionNotes = () => {
         // Find the caption div (last child div with font-size 11px)
         const caption = wrapper.querySelector('div[style*="font-size"]')
 
+        const markerColors = ['#0284c7', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2', '#4f46e5', '#ca8a04', '#be185d', '#15803d']
+
         if (annotations.length > 0) {
-            // Create a container that wraps the image + annotation pins/labels
+            // Create a container that wraps the image + numbered pins
             const imgContainer = document.createElement('div')
             imgContainer.className = 'annotation-overlay'
             imgContainer.setAttribute('contenteditable', 'false')
@@ -257,30 +277,13 @@ const SessionNotes = () => {
 
             imgContainer.appendChild(cleanImg)
 
-            // SVG for connector lines
-            let svgLines = ''
-            annotations.forEach(ann => {
-                const lx = ann.xPct > 60 ? ann.xPct - 18 : ann.xPct + 10
-                const ly = ann.yPct > 15 ? ann.yPct - 10 : ann.yPct + 10
-                svgLines += `<line x1="${ann.xPct}%" y1="${ann.yPct}%" x2="${lx}%" y2="${ly}%" stroke="#0284c7" stroke-width="1.5" stroke-dasharray="4 2" />`
-            })
-            const svgTmp = document.createElement('div')
-            svgTmp.innerHTML = `<svg style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;">${svgLines}</svg>`
-            imgContainer.appendChild(svgTmp.firstChild)
-
-            // Pins and labels
-            annotations.forEach(ann => {
-                const lx = ann.xPct > 60 ? ann.xPct - 18 : ann.xPct + 10
-                const ly = ann.yPct > 15 ? ann.yPct - 10 : ann.yPct + 10
-
+            // Numbered pin markers on the image
+            annotations.forEach((ann, index) => {
+                const color = markerColors[index % markerColors.length]
                 const pin = document.createElement('div')
-                pin.style.cssText = `position:absolute;left:${ann.xPct}%;top:${ann.yPct}%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#0284c7;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.3);z-index:2;pointer-events:none;`
+                pin.style.cssText = `position:absolute;left:${ann.xPct}%;top:${ann.yPct}%;transform:translate(-50%,-50%);width:24px;height:24px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);z-index:2;pointer-events:none;display:flex;align-items:center;justify-content:center;`
+                pin.innerHTML = `<span style="color:white;font-size:11px;font-weight:700;line-height:1;">${index + 1}</span>`
                 imgContainer.appendChild(pin)
-
-                const label = document.createElement('div')
-                label.style.cssText = `position:absolute;left:${lx}%;top:${ly}%;transform:translate(-50%,-50%);background:white;border:1px solid #0284c7;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;color:#0369a1;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.15);z-index:3;pointer-events:none;`
-                label.textContent = ann.label
-                imgContainer.appendChild(label)
             })
 
             // Insert the annotated container before caption
@@ -288,6 +291,24 @@ const SessionNotes = () => {
                 wrapper.insertBefore(imgContainer, caption)
             } else {
                 wrapper.appendChild(imgContainer)
+            }
+
+            // Legend below the image
+            const legend = document.createElement('div')
+            legend.className = 'annotation-legend'
+            legend.setAttribute('contenteditable', 'false')
+            legend.style.cssText = 'margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;'
+            annotations.forEach((ann, index) => {
+                const color = markerColors[index % markerColors.length]
+                const item = document.createElement('div')
+                item.style.cssText = `display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;`
+                item.innerHTML = `<span style="width:18px;height:18px;border-radius:50%;background:${color};color:white;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${index + 1}</span><span style="font-weight:600;color:#334155;">${ann.label}</span>`
+                legend.appendChild(item)
+            })
+            if (caption) {
+                wrapper.insertBefore(legend, caption)
+            } else {
+                wrapper.appendChild(legend)
             }
         } else {
             // No annotations — just put back the clean image
@@ -314,6 +335,189 @@ const SessionNotes = () => {
         }
     }, [location.state]);
 
+    // Transform old annotation overlays in the note viewing popup
+    useEffect(() => {
+        const container = noteViewContentRef.current
+        if (!container || !viewingNote) return
+
+        // Prevent native image drag
+        const imgs = container.querySelectorAll('img')
+        imgs.forEach(img => {
+            img.draggable = false
+            img.ondragstart = () => false
+        })
+
+        const markerColors = ['#0284c7', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2', '#4f46e5', '#ca8a04', '#be185d', '#15803d']
+
+        // Find annotation wrappers (parent divs with data-annotations)
+        const wrappers = container.querySelectorAll('div[data-annotations]')
+        wrappers.forEach(wrapper => {
+            let annotations = []
+            try {
+                annotations = JSON.parse(wrapper.getAttribute('data-annotations') || '[]')
+            } catch { return }
+            if (!annotations.length) return
+
+            const overlay = wrapper.querySelector('.annotation-overlay')
+            if (!overlay) return
+
+            // Remove old SVG connector lines
+            const svg = overlay.querySelector('svg')
+            if (svg) svg.remove()
+
+            // Remove old text labels (divs that are not pins and not img)
+            const children = Array.from(overlay.children)
+            children.forEach(el => {
+                if (el.tagName === 'IMG') return
+                // It's a pin or label div - remove all, we'll recreate
+                el.remove()
+            })
+
+            // Add numbered markers on the image
+            annotations.forEach((ann, index) => {
+                const color = markerColors[index % markerColors.length]
+                const pin = document.createElement('div')
+                pin.style.cssText = `position:absolute;left:${ann.xPct}%;top:${ann.yPct}%;transform:translate(-50%,-50%);width:24px;height:24px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);z-index:2;pointer-events:none;display:flex;align-items:center;justify-content:center;`
+                pin.innerHTML = `<span style="color:white;font-size:11px;font-weight:700;line-height:1;">${index + 1}</span>`
+                overlay.appendChild(pin)
+            })
+
+            // Remove any existing legend
+            const oldLegend = wrapper.querySelector('.annotation-legend')
+            if (oldLegend) oldLegend.remove()
+
+            // Add legend below the image
+            const legend = document.createElement('div')
+            legend.className = 'annotation-legend'
+            legend.style.cssText = 'margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;'
+            annotations.forEach((ann, index) => {
+                const color = markerColors[index % markerColors.length]
+                const item = document.createElement('div')
+                item.style.cssText = `display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;`
+                item.innerHTML = `<span style="width:18px;height:18px;border-radius:50%;background:${color};color:white;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${index + 1}</span><span style="font-weight:600;color:#334155;">${ann.label}</span>`
+                legend.appendChild(item)
+            })
+            // Insert legend after the overlay
+            overlay.parentNode.insertBefore(legend, overlay.nextSibling)
+        })
+    }, [viewingNote])
+
+    const handleFileSelect = (e) => {
+        const file = e.target.files[0]
+        if (!file) return
+        if (!file.type.startsWith('audio/')) {
+            setUploadError('Please select an audio file')
+            return
+        }
+        setUploadFile(file)
+        setUploadError('')
+        // Automatically start upload after file selection
+        handleUploadAudioWithFile(file)
+    }
+
+    const handleUploadAudioWithFile = async (file) => {
+        if (!selectedPatientId) {
+            setUploadError('Please select a patient first')
+            return
+        }
+        if (!file) return
+
+        setUploading(true)
+        setUploadError('')
+        setUploadProgress(0)
+        setUploadStep('uploading')
+
+        let recordingId = null
+
+        try {
+            // Step 1: Upload the audio file
+            const formData = new FormData()
+            formData.append('audio', file)
+            formData.append('patient_id', selectedPatientId)
+
+            const response = await recordingService.uploadAudioFile(formData, (progressEvent) => {
+                const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+                setUploadProgress(percent)
+            })
+
+            if (response.data) {
+                recordingId = response.data.id
+            }
+
+            // Step 2: Transcribe the audio
+            setUploadStep('transcribing')
+            setUploadProgress(0)
+            let transcriptText = ''
+
+            try {
+                const transcribeForm = new FormData()
+                transcribeForm.append('audio', file)
+                const transcribeResponse = await recordingService.transcribeAudio(transcribeForm)
+                if (transcribeResponse.data && transcribeResponse.data.success) {
+                    transcriptText = transcribeResponse.data.transcript
+                } else {
+                    throw new Error(transcribeResponse.data?.message || 'Transcription failed')
+                }
+            } catch (transcribeError) {
+                console.error('Error transcribing audio:', transcribeError)
+                setUploadError('Audio uploaded, but transcription failed: ' + transcribeError.message)
+            }
+
+            // Save transcript to recording
+            if (recordingId && transcriptText.length > 0) {
+                try {
+                    await recordingService.update(recordingId, { transcript: transcriptText })
+                } catch (updateErr) {
+                    console.error('Error saving transcript:', updateErr)
+                }
+            }
+
+            // Step 3: Generate clinical summary
+            if (transcriptText.length > 0) {
+                setUploadStep('summarizing')
+                setGeneratingSummary(true)
+                try {
+                    const summaryResponse = await recordingService.generateClinicalSummary({
+                        transcript: transcriptText,
+                        patient_id: selectedPatientId,
+                        duration: 'N/A'
+                    })
+                    if (summaryResponse.data && summaryResponse.data.success) {
+                        setClinicalSummary(summaryResponse.data.summary)
+                        setAiSummary(summaryResponse.data.summary)
+                        if (recordingId) {
+                            try {
+                                await recordingService.update(recordingId, { summary: summaryResponse.data.summary })
+                            } catch (updateErr) {
+                                console.error('Error saving summary:', updateErr)
+                            }
+                        }
+                        setShowSummaryModal(true)
+                    }
+                } catch (summaryError) {
+                    console.error('Error generating summary:', summaryError)
+                } finally {
+                    setGeneratingSummary(false)
+                }
+            }
+
+            // Set transcript data to show in the tab
+            if (transcriptText.length > 0) {
+                setTranscriptData(transcriptText)
+            }
+
+            setUploadFile(null)
+            if (fileInputRef.current) fileInputRef.current.value = ''
+        } catch (err) {
+            console.error('Error uploading audio:', err)
+            setUploadError(err.response?.data?.message || 'Failed to upload audio file')
+        } finally {
+            setUploading(false)
+            setUploadProgress(0)
+            setUploadStep('')
+        }
+    }
+
     const sectionHeader = (title) =>
         `<div style="background:#f8fafc;border-left:3px solid #4338ca;padding:6px 12px;margin:20px 0 12px 0;"><b style="color:#1e293b;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;">${title}</b></div>`
 
@@ -337,7 +541,7 @@ const SessionNotes = () => {
 
     const docFooter = () =>
         `<div style="margin-top:24px;padding-top:12px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;">` +
-        `<span style="font-size:10px;color:#94a3b8;">DynaCare &mdash; HIPAA Compliant Mental Health Platform</span>` +
+        `<span style="font-size:10px;color:#94a3b8;">DynaCare</span>` +
         `<span style="font-size:10px;color:#94a3b8;">Clinician Signature: _______________</span>` +
         `</div>`
 
@@ -869,6 +1073,13 @@ const SessionNotes = () => {
                                                     </div>
                                                 </div>
                                                 <button
+                                                    onClick={() => setShowClearConfirm(true)}
+                                                    className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-lg font-semibold hover:bg-slate-50 transition-all flex items-center space-x-2 text-sm"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    <span>Clear All</span>
+                                                </button>
+                                                <button
                                                     onClick={handleGetSymptomReport}
                                                     disabled={isSymptomReportLoading || (!getEditorTextContent() && !transcriptData)}
                                                     className={`px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-all flex items-center space-x-2 shadow-lg shadow-indigo-200 ${(isSymptomReportLoading || (!getEditorTextContent() && !transcriptData)) ? 'opacity-70 cursor-not-allowed' : ''}`}
@@ -999,33 +1210,6 @@ const SessionNotes = () => {
                                         </div>
                                     </div>
 
-                                    {/* AI Writing Assistant */}
-                                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                        <div className="flex items-start space-x-3">
-                                            <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
-                                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                                            </div>
-                                            <div className="flex-1">
-                                                <h4 className="font-semibold text-slate-800 mb-1">AI Writing Assistant</h4>
-                                                <p className="text-sm text-slate-600 mb-3">
-                                                    Get AI-powered suggestions to enhance your clinical documentation and ensure comprehensive coverage.
-                                                </p>
-                                                <div className="flex items-center space-x-3">
-                                                    <button className="text-sm font-medium text-primary-600 hover:text-primary-700">
-                                                        Improve Grammar
-                                                    </button>
-                                                    <span className="text-slate-300">•</span>
-                                                    <button className="text-sm font-medium text-primary-600 hover:text-primary-700">
-                                                        Add Clinical Details
-                                                    </button>
-                                                    <span className="text-slate-300">•</span>
-                                                    <button className="text-sm font-medium text-primary-600 hover:text-primary-700">
-                                                        Summarize Key Points
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
                                 </div>
                             )}
 
@@ -1198,48 +1382,65 @@ const SessionNotes = () => {
                                 <div className="p-6">
                                     {transcriptData ? (
                                         <div className="space-y-6">
-                                            <div className="flex items-center justify-between mb-4">
-                                                <h3 className="font-bold text-slate-800 flex items-center space-x-2">
-                                                    <span>🎤</span>
-                                                    <span>Session Transcript</span>
-                                                </h3>
-                                                <button
-                                                    onClick={() => {
-                                                        if (editorRef.current) {
-                                                            const escaped = transcriptData.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
-                                                            editorRef.current.innerHTML += `<hr><p><b>Transcript</b></p><p>${escaped}</p>`
-                                                            setNoteContent(getEditorContent())
-                                                        }
-                                                    }}
-                                                    className="px-4 py-2 bg-primary-50 text-primary-600 rounded-lg font-bold hover:bg-primary-100 transition-all flex items-center space-x-2"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
-                                                    <span>Copy to Notes</span>
-                                                </button>
+                                            <div className="mb-4">
+                                                <h3 className="font-bold text-slate-800">Session Transcript</h3>
                                             </div>
                                             <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 max-h-[600px] overflow-y-auto">
                                                 <p className="text-slate-700 leading-relaxed whitespace-pre-wrap font-sans text-lg">
                                                     {transcriptData}
                                                 </p>
                                             </div>
-                                            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                                                <p className="text-sm text-yellow-800">
-                                                    <strong>💡 Tip:</strong> You can select portions of this transcript to refine your clinical notes or use the "Copy to Notes" button to append the entire text.
-                                                </p>
-                                            </div>
                                         </div>
                                     ) : (
                                         <div className="text-center py-16">
+                                            <input
+                                                ref={fileInputRef}
+                                                type="file"
+                                                accept="audio/*"
+                                                onChange={handleFileSelect}
+                                                className="hidden"
+                                            />
                                             <div className="w-20 h-20 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
                                                 <svg className="w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                                                 </svg>
                                             </div>
-                                            <h3 className="text-lg font-semibold text-slate-700 mb-2">No Transcript Available</h3>
-                                            <p className="text-slate-500 mb-6">Upload a session recording to generate an AI transcript</p>
-                                            <button className="btn-primary">
-                                                Upload Recording
-                                            </button>
+                                            {uploading ? (
+                                                <>
+                                                    <h3 className="text-lg font-semibold text-slate-700 mb-2">
+                                                        {uploadStep === 'uploading' && 'Uploading audio...'}
+                                                        {uploadStep === 'transcribing' && 'Transcribing with AI...'}
+                                                        {uploadStep === 'summarizing' && 'Generating clinical summary...'}
+                                                    </h3>
+                                                    <div className="w-64 mx-auto mt-4">
+                                                        <div className="flex items-center justify-between text-xs font-bold mb-2">
+                                                            <span className={uploadStep === 'uploading' ? 'text-primary-600' : 'text-green-600'}>Upload</span>
+                                                            <span className={uploadStep === 'transcribing' ? 'text-primary-600' : uploadStep === 'summarizing' ? 'text-green-600' : 'text-slate-400'}>Transcribe</span>
+                                                            <span className={uploadStep === 'summarizing' ? 'text-primary-600' : 'text-slate-400'}>Summary</span>
+                                                        </div>
+                                                        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-primary-600 rounded-full transition-all duration-500 ease-out"
+                                                                style={{ width: uploadStep === 'uploading' ? `${uploadProgress}%` : uploadStep === 'transcribing' ? '66%' : '90%' }}
+                                                            ></div>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <h3 className="text-lg font-semibold text-slate-700 mb-2">No Transcript Available</h3>
+                                                    <p className="text-slate-500 mb-6">Upload a session recording to generate an AI transcript</p>
+                                                    {uploadError && (
+                                                        <p className="text-sm text-red-600 mb-4">{uploadError}</p>
+                                                    )}
+                                                    <button
+                                                        onClick={() => fileInputRef.current?.click()}
+                                                        className="btn-primary"
+                                                    >
+                                                        Upload Recording
+                                                    </button>
+                                                </>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -1336,7 +1537,7 @@ const SessionNotes = () => {
                                             </div>
                                         </div>
 
-                                        {/* Assessment History */}
+                                        {/* Score Trends - commented out
                                         <div className="bg-white border border-slate-200 rounded-xl p-6">
                                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
                                                 <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1378,6 +1579,7 @@ const SessionNotes = () => {
                                                 ))}
                                             </div>
                                         </div>
+                                        */}
                                     </div>
                                 </div>
                             )}
@@ -1451,7 +1653,7 @@ const SessionNotes = () => {
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 {[
                                                     { format: 'PDF', color: 'text-red-500 bg-red-50', description: 'Professional clinical report format' },
-                                                    { format: 'Word', color: 'text-blue-500 bg-blue-50', description: 'Editable document format (.doc)' }
+                                                    // { format: 'Word', color: 'text-blue-500 bg-blue-50', description: 'Editable document format (.doc)' }
                                                 ].map((option, index) => (
                                                     <button key={index} onClick={() => setExportFormat(option.format)} className={`relative p-6 rounded-xl border-2 text-left transition-all hover:shadow-md ${exportFormat === option.format ? 'border-primary-500 bg-primary-50' : 'border-slate-200 hover:border-slate-300'}`}>
                                                         {exportFormat === option.format && (
@@ -1468,51 +1670,6 @@ const SessionNotes = () => {
                                                         <p className="text-sm text-slate-500">{option.description}</p>
                                                     </button>
                                                 ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Content Selection */}
-                                        <div className="bg-white border border-slate-200 rounded-xl p-6">
-                                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                                                <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                                <span>Include in Export</span>
-                                            </h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {[
-                                                    { label: 'Session Notes', checked: true },
-                                                    { label: 'AI-Generated Insights', checked: true },
-                                                    { label: 'Assessment Scores', checked: true },
-                                                    { label: 'Treatment Goals', checked: true },
-                                                    { label: 'Session Transcript', checked: false },
-                                                    { label: 'Appointment History', checked: false }
-                                                ].map((item, index) => (
-                                                    <label key={index} className="flex items-center space-x-3 p-4 bg-slate-50 rounded-lg cursor-pointer hover:bg-slate-100 transition-colors">
-                                                        <input type="checkbox" defaultChecked={item.checked} className="w-5 h-5 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
-                                                        <span className="font-medium text-slate-700">{item.label}</span>
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Privacy Options */}
-                                        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
-                                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
-                                                <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-                                                <span>Privacy & Compliance</span>
-                                            </h3>
-                                            <div className="space-y-3">
-                                                <label className="flex items-center space-x-3 cursor-pointer">
-                                                    <input type="checkbox" defaultChecked className="w-5 h-5 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
-                                                    <span className="text-sm text-slate-700">Include HIPAA compliance header</span>
-                                                </label>
-                                                <label className="flex items-center space-x-3 cursor-pointer">
-                                                    <input type="checkbox" className="w-5 h-5 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
-                                                    <span className="text-sm text-slate-700">Redact personally identifiable information</span>
-                                                </label>
-                                                <label className="flex items-center space-x-3 cursor-pointer">
-                                                    <input type="checkbox" defaultChecked className="w-5 h-5 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
-                                                    <span className="text-sm text-slate-700">Add digital signature and timestamp</span>
-                                                </label>
                                             </div>
                                         </div>
 
@@ -1639,12 +1796,13 @@ const SessionNotes = () => {
                                     <p className="text-sm text-slate-500">{dateStr} at {timeStr}</p>
                                 </div>
                                 <div className="flex items-center space-x-2">
-                                    {/* <button
+                                    <button
                                         onClick={() => {
                                             if (editorRef.current) {
                                                 editorRef.current.innerHTML = viewingNote.content
                                                 setNoteContent(viewingNote.content)
                                             }
+                                            setSelectedPatientId(viewingNote.patient_id?.toString() || selectedPatientId)
                                             setViewingNote(null)
                                             setActiveTab('editor')
                                         }}
@@ -1653,8 +1811,8 @@ const SessionNotes = () => {
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                         </svg>
-                                        <span>Edit in Editor</span>
-                                    </button> */}
+                                        <span>Edit Note</span>
+                                    </button>
                                     <button
                                         onClick={() => setViewingNote(null)}
                                         className="p-2 hover:bg-slate-200 rounded-full transition-colors"
@@ -1668,6 +1826,7 @@ const SessionNotes = () => {
                             {/* Content */}
                             <div className="p-6 overflow-y-auto">
                                 <div
+                                    ref={noteViewContentRef}
                                     className="prose prose-slate max-w-none text-slate-700 leading-relaxed"
                                     dangerouslySetInnerHTML={{ __html: viewingNote.content }}
                                 />
@@ -1676,6 +1835,145 @@ const SessionNotes = () => {
                     </div>
                 )
             })()}
+
+            {/* AI Clinical Summary Modal */}
+            {showSummaryModal && clinicalSummary && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4 overflow-y-auto">
+                    <div className="bg-white rounded-2xl w-full max-w-4xl my-8 shadow-2xl overflow-hidden">
+                        <div className="bg-indigo-600 px-8 py-6 flex items-center justify-between sticky top-0 z-10">
+                            <h2 className="text-2xl font-bold text-white">AI Clinical Summary</h2>
+                            <button onClick={() => setShowSummaryModal(false)} className="text-white hover:text-indigo-100 transition-colors">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="p-8 space-y-8">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="p-6 bg-blue-50 rounded-xl border border-blue-100">
+                                    <h4 className="text-xs font-bold text-blue-600 uppercase mb-2">Mood & Affect</h4>
+                                    <p className="text-slate-800 font-medium">{clinicalSummary.overview?.mood} / {clinicalSummary.overview?.affect}</p>
+                                </div>
+                                <div className="p-6 bg-purple-50 rounded-xl border border-purple-100">
+                                    <h4 className="text-xs font-bold text-purple-600 uppercase mb-2">Engagement</h4>
+                                    <p className="text-slate-800 font-medium">{clinicalSummary.overview?.engagement}</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="p-6 bg-indigo-50 rounded-xl border border-indigo-100">
+                                    <h4 className="text-xs font-bold text-indigo-600 uppercase mb-3 flex items-center">
+                                        <span>DSM-5 Indications</span>
+                                    </h4>
+                                    {clinicalSummary.clinicalImpression?.possibleDiagnoses?.length > 0 ? (
+                                        <div className="space-y-3">
+                                            {clinicalSummary.clinicalImpression.possibleDiagnoses.map((dx, i) => (
+                                                <div key={i} className="bg-white p-3 rounded-lg border border-indigo-50 shadow-sm">
+                                                    <div className="flex justify-between items-start">
+                                                        <span className="font-bold text-slate-800 text-sm">{dx.name}</span>
+                                                        <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-mono">{dx.code}</span>
+                                                    </div>
+                                                    <p className="text-xs text-slate-500 mt-1">{dx.criteria_met}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-slate-500 text-sm italic">No specific DSM-5 matches found.</p>
+                                    )}
+                                </div>
+
+                                <div className="p-6 bg-yellow-50 rounded-xl border border-yellow-100">
+                                    <h4 className="text-xs font-bold text-yellow-700 uppercase mb-3 flex items-center">
+                                        <span>Reported Symptoms</span>
+                                    </h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {clinicalSummary.symptoms?.reported?.map((sym, i) => (
+                                            <span key={i} className="px-3 py-1 bg-white border border-yellow-200 text-yellow-800 rounded-full text-xs font-medium shadow-sm">
+                                                {sym}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <div className="mt-4 pt-4 border-t border-yellow-200/50">
+                                        <p className="text-xs font-bold text-yellow-800">Severity Assessment: <span className="font-normal">{clinicalSummary.symptoms?.severity}</span></p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-8 flex items-center justify-end space-x-4">
+                                <button
+                                    onClick={() => {
+                                        const selectedPatientData = patients.find(p => p.id === parseInt(selectedPatientId));
+                                        const patientName = selectedPatientData?.full_name || 'Patient';
+                                        exportClinicalSummaryToPDF(clinicalSummary, patientName);
+                                    }}
+                                    className="px-6 py-3 bg-white border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50 font-bold rounded-xl transition-all flex items-center space-x-2"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                                    </svg>
+                                    <span>Export Summary</span>
+                                </button>
+                                <button
+                                    onClick={() => setShowSummaryModal(false)}
+                                    className="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-200 transition-all"
+                                >
+                                    Done
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Generating Summary Loader */}
+            {generatingSummary && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl p-8 shadow-2xl text-center">
+                        <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                        <h3 className="text-xl font-bold text-slate-800 mb-2">Generating Clinical Summary...</h3>
+                        <p className="text-slate-500">Analyzing transcript with AI</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Clear All Confirmation */}
+            {showClearConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+                        <div className="p-6 text-center">
+                            <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <svg className="w-7 h-7 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </div>
+                            <h3 className="text-lg font-bold text-slate-800 mb-2">Clear Editor</h3>
+                            <p className="text-sm text-slate-500">Are you sure you want to clear all content from the editor? This action cannot be undone.</p>
+                        </div>
+                        <div className="px-6 pb-6 flex items-center justify-center space-x-3">
+                            <button
+                                onClick={() => setShowClearConfirm(false)}
+                                className="px-6 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-xl font-semibold hover:bg-slate-50 transition-all"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (editorRef.current) {
+                                        editorRef.current.innerHTML = ''
+                                    }
+                                    setNoteContent('')
+                                    setCharCount(0)
+                                    setSelectedTemplate(null)
+                                    setShowClearConfirm(false)
+                                }}
+                                className="px-6 py-2.5 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all"
+                            >
+                                Clear All
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

@@ -6,6 +6,7 @@ const ScheduleAppointmentModal = ({ isOpen, onClose, onAppointmentScheduled }) =
     const [formData, setFormData] = useState({
         patient_id: '',
         appointment_date: '',
+        appointment_time: '',
         duration: 60,
         type: 'Initial Consultation',
         notes: ''
@@ -46,9 +47,12 @@ const ScheduleAppointmentModal = ({ isOpen, onClose, onAppointmentScheduled }) =
         setLoading(true);
         setError('');
         try {
-            // Send the datetime-local value directly — PostgreSQL TIMESTAMP WITH TIME ZONE
-            // handles it correctly, and avoids UTC conversion shifting the time/date
-            const submissionData = { ...formData };
+            // Combine separate date and time fields into a single datetime string
+            const { appointment_time, ...rest } = formData;
+            const submissionData = {
+                ...rest,
+                appointment_date: `${formData.appointment_date}T${formData.appointment_time}`
+            };
             console.log('Scheduling appointment with data:', submissionData);
             await appointmentService.create(submissionData);
             onAppointmentScheduled();
@@ -105,14 +109,25 @@ const ScheduleAppointmentModal = ({ isOpen, onClose, onAppointmentScheduled }) =
                             </select>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-3 gap-4">
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-2">Date & Time *</label>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">Date *</label>
                                 <input
                                     required
-                                    type="datetime-local"
+                                    type="date"
                                     name="appointment_date"
                                     value={formData.appointment_date}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:border-primary-500 outline-none transition-all"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">Time *</label>
+                                <input
+                                    required
+                                    type="time"
+                                    name="appointment_time"
+                                    value={formData.appointment_time}
                                     onChange={handleChange}
                                     className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:border-primary-500 outline-none transition-all"
                                 />

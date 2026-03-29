@@ -8,7 +8,7 @@ const ImageAnnotationOverlay = ({ imageSrc, imageLabel, annotations: initialAnno
     const labelInputRef = useRef(null)
 
     const handleImageClick = useCallback((e) => {
-        if (pendingPin) return // already placing a pin
+        if (pendingPin) return
 
         const rect = e.currentTarget.getBoundingClientRect()
         const xPct = ((e.clientX - rect.left) / rect.width) * 100
@@ -46,11 +46,8 @@ const ImageAnnotationOverlay = ({ imageSrc, imageLabel, annotations: initialAnno
         setPendingLabel('')
     }
 
-    const getLabelPosition = (xPct, yPct) => {
-        const lx = xPct > 60 ? xPct - 18 : xPct + 10
-        const ly = yPct > 15 ? yPct - 10 : yPct + 10
-        return { lx, ly }
-    }
+    // Colors for numbered markers
+    const markerColors = ['#0284c7', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2', '#4f46e5', '#ca8a04', '#be185d', '#15803d']
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
@@ -67,7 +64,7 @@ const ImageAnnotationOverlay = ({ imageSrc, imageLabel, annotations: initialAnno
                             </svg>
                             Annotate Image
                         </h3>
-                        <p className="text-sm text-slate-500 mt-0.5">Click anywhere on the image to place a label</p>
+                        <p className="text-sm text-slate-500 mt-0.5">Click anywhere on the image to place a numbered marker</p>
                     </div>
                     <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg transition-colors">
                         <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -78,7 +75,7 @@ const ImageAnnotationOverlay = ({ imageSrc, imageLabel, annotations: initialAnno
 
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto p-6">
-                    {/* Image with annotations */}
+                    {/* Image with numbered pins only */}
                     <div
                         ref={imageContainerRef}
                         className="relative inline-block w-full select-none"
@@ -88,141 +85,101 @@ const ImageAnnotationOverlay = ({ imageSrc, imageLabel, annotations: initialAnno
                             src={imageSrc}
                             alt={imageLabel}
                             onClick={handleImageClick}
+                            onDragStart={(e) => e.preventDefault()}
                             className="w-full rounded-lg"
                             style={{ display: 'block' }}
                             draggable={false}
                         />
 
-                        {/* SVG connector lines */}
-                        <svg
-                            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-                        >
-                            {annotations.map(ann => {
-                                const { lx, ly } = getLabelPosition(ann.xPct, ann.yPct)
-                                return (
-                                    <line
-                                        key={ann.id}
-                                        x1={`${ann.xPct}%`} y1={`${ann.yPct}%`}
-                                        x2={`${lx}%`} y2={`${ly}%`}
-                                        stroke="#0284c7"
-                                        strokeWidth="1.5"
-                                        strokeDasharray="4 2"
-                                    />
-                                )
-                            })}
-                            {/* Pending pin line */}
-                            {pendingPin && (() => {
-                                const { lx, ly } = getLabelPosition(pendingPin.xPct, pendingPin.yPct)
-                                return (
-                                    <line
-                                        x1={`${pendingPin.xPct}%`} y1={`${pendingPin.yPct}%`}
-                                        x2={`${lx}%`} y2={`${ly}%`}
-                                        stroke="#f59e0b"
-                                        strokeWidth="1.5"
-                                        strokeDasharray="4 2"
-                                    />
-                                )
-                            })()}
-                        </svg>
-
-                        {/* Existing annotation pins & labels */}
-                        {annotations.map(ann => {
-                            const { lx, ly } = getLabelPosition(ann.xPct, ann.yPct)
-                            return (
-                                <React.Fragment key={ann.id}>
-                                    {/* Pin dot */}
-                                    <div
-                                        style={{
-                                            position: 'absolute',
-                                            left: `${ann.xPct}%`,
-                                            top: `${ann.yPct}%`,
-                                            transform: 'translate(-50%, -50%)',
-                                            width: 14,
-                                            height: 14,
-                                            borderRadius: '50%',
-                                            background: '#0284c7',
-                                            border: '2.5px solid white',
-                                            boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
-                                            pointerEvents: 'none',
-                                            zIndex: 2
-                                        }}
-                                    />
-                                    {/* Label */}
-                                    <div
-                                        style={{
-                                            position: 'absolute',
-                                            left: `${lx}%`,
-                                            top: `${ly}%`,
-                                            transform: 'translate(-50%, -50%)',
-                                            zIndex: 3
-                                        }}
-                                    >
-                                        <div className="flex items-center gap-1 bg-white border border-sky-600 rounded-md px-2 py-1 shadow-md">
-                                            <span style={{ fontSize: 12, fontWeight: 600, color: '#0369a1', whiteSpace: 'nowrap' }}>
-                                                {ann.label}
-                                            </span>
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); handleDeleteAnnotation(ann.id) }}
-                                                className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-red-100 hover:bg-red-200 transition-colors"
-                                                title="Remove label"
-                                            >
-                                                <svg className="w-2.5 h-2.5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </React.Fragment>
-                            )
-                        })}
+                        {/* Numbered pin markers on the image */}
+                        {annotations.map((ann, index) => (
+                            <div
+                                key={ann.id}
+                                style={{
+                                    position: 'absolute',
+                                    left: `${ann.xPct}%`,
+                                    top: `${ann.yPct}%`,
+                                    transform: 'translate(-50%, -50%)',
+                                    width: 26,
+                                    height: 26,
+                                    borderRadius: '50%',
+                                    background: markerColors[index % markerColors.length],
+                                    border: '2.5px solid white',
+                                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    pointerEvents: 'none',
+                                    zIndex: 2
+                                }}
+                            >
+                                <span style={{ color: 'white', fontSize: 12, fontWeight: 700, lineHeight: 1 }}>{index + 1}</span>
+                            </div>
+                        ))}
 
                         {/* Pending pin (pulsing) */}
                         {pendingPin && (
-                            <>
-                                <div
-                                    style={{
-                                        position: 'absolute',
-                                        left: `${pendingPin.xPct}%`,
-                                        top: `${pendingPin.yPct}%`,
-                                        transform: 'translate(-50%, -50%)',
-                                        width: 18,
-                                        height: 18,
-                                        borderRadius: '50%',
-                                        background: '#f59e0b',
-                                        border: '3px solid white',
-                                        boxShadow: '0 2px 8px rgba(245,158,11,0.5)',
-                                        zIndex: 4,
-                                        animation: 'pulse 1.5s ease-in-out infinite'
-                                    }}
-                                />
-                                {/* Pending label position indicator */}
-                                {(() => {
-                                    const { lx, ly } = getLabelPosition(pendingPin.xPct, pendingPin.yPct)
-                                    return (
-                                        <div
-                                            style={{
-                                                position: 'absolute',
-                                                left: `${lx}%`,
-                                                top: `${ly}%`,
-                                                transform: 'translate(-50%, -50%)',
-                                                zIndex: 5
-                                            }}
-                                        >
-                                            <div className="bg-amber-50 border-2 border-amber-400 rounded-md px-2 py-1 shadow-lg">
-                                                <span style={{ fontSize: 11, color: '#92400e', fontStyle: 'italic' }}>
-                                                    {pendingLabel || 'Type label below...'}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    )
-                                })()}
-                            </>
+                            <div
+                                style={{
+                                    position: 'absolute',
+                                    left: `${pendingPin.xPct}%`,
+                                    top: `${pendingPin.yPct}%`,
+                                    transform: 'translate(-50%, -50%)',
+                                    width: 26,
+                                    height: 26,
+                                    borderRadius: '50%',
+                                    background: '#f59e0b',
+                                    border: '3px solid white',
+                                    boxShadow: '0 2px 8px rgba(245,158,11,0.5)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    zIndex: 4,
+                                    animation: 'pulse 1.5s ease-in-out infinite'
+                                }}
+                            >
+                                <span style={{ color: 'white', fontSize: 12, fontWeight: 700 }}>?</span>
+                            </div>
                         )}
                     </div>
 
+                    {/* Labels listed below the image */}
+                    {annotations.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                            {annotations.map((ann, index) => (
+                                <div key={ann.id} className="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-lg border border-slate-200">
+                                    <div
+                                        style={{
+                                            width: 24,
+                                            height: 24,
+                                            borderRadius: '50%',
+                                            background: markerColors[index % markerColors.length],
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            flexShrink: 0
+                                        }}
+                                    >
+                                        <span style={{ color: 'white', fontSize: 11, fontWeight: 700 }}>{index + 1}</span>
+                                    </div>
+                                    <span className="text-sm font-semibold text-slate-800 flex-1">{ann.label}</span>
+                                    <button
+                                        onClick={() => handleDeleteAnnotation(ann.id)}
+                                        className="w-6 h-6 flex items-center justify-center rounded-full bg-red-100 hover:bg-red-200 transition-colors"
+                                        title="Remove"
+                                    >
+                                        <svg className="w-3 h-3 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
                     {/* Label Input (appears when pin is placed) */}
                     {pendingPin && (
-                        <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3 animate-in slide-in-from-bottom-2">
+                        <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3">
                             <div className="w-8 h-8 bg-amber-400 rounded-full flex items-center justify-center shrink-0">
                                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" />

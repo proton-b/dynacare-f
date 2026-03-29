@@ -60,8 +60,6 @@ const Login = () => {
                             <div className="flex justify-center mb-2 mt-10">
                                 <img src={logo} alt="DynaCare Logo" className="w-64 h-auto object-contain mix-blend-multiply" />
                             </div>
-                            <h2 className="text-3xl font-bold text-slate-900 font-display">Welcome back</h2>
-                            <p className="mt-2 text-slate-600">Please enter your details to sign in.</p>
                         </div>
 
                         <form className="space-y-6" onSubmit={handleSubmit}>
@@ -132,32 +130,6 @@ const Login = () => {
                             </button>
                         </form>
 
-                        <div className="relative">
-                            <div className="absolute inset-0 flex items-center">
-                                <div className="w-full border-t border-slate-200"></div>
-                            </div>
-                            <div className="relative flex justify-center text-sm">
-                                <span className="px-2 bg-slate-50 text-slate-500 font-medium">Or continue with</span>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <button className="flex items-center justify-center px-4 py-2.5 border border-slate-200 rounded-xl hover:bg-white hover:border-slate-300 hover:shadow-sm transition-all bg-white">
-                                <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="h-5 w-5 mr-2" alt="Google" />
-                                <span className="text-sm font-semibold text-slate-700">Google</span>
-                            </button>
-                            <button className="flex items-center justify-center px-4 py-2.5 border border-slate-200 rounded-xl hover:bg-white hover:border-slate-300 hover:shadow-sm transition-all bg-white">
-                                <img src="https://www.svgrepo.com/show/448234/microsoft.svg" className="h-5 w-5 mr-2" alt="Microsoft" />
-                                <span className="text-sm font-semibold text-slate-700">Microsoft</span>
-                            </button>
-                        </div>
-
-                        <p className="text-center text-sm text-slate-600">
-                            Don't have an account?{' '}
-                            <Link to="/signup" className="font-bold text-primary-600 hover:text-primary-700 transition-colors">
-                                Sign up for free
-                            </Link>
-                        </p>
                     </div>
                 </div>
 

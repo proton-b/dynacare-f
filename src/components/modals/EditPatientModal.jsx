@@ -55,7 +55,7 @@ const EditPatientModal = ({ isOpen, onClose, patient, onPatientUpdated }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
                 <div className="px-8 py-6 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                     <div>
