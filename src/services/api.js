@@ -116,4 +116,37 @@ export const settingsService = {
     update: (settingsData) => api.patch('/settings', settingsData),
 };
 
+// Separate axios instance for admin (uses adminToken)
+const adminApi = axios.create({
+    baseURL: API_URL,
+    headers: {
+        'Content-Type': 'application/json',
+    },
+});
+
+adminApi.interceptors.request.use(
+    (config) => {
+        const token = localStorage.getItem('adminToken');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
+export const adminService = {
+    login: (email, password) => adminApi.post('/admin/login', { email, password }),
+    getStats: () => adminApi.get('/admin/stats'),
+    getDoctors: () => adminApi.get('/admin/doctors'),
+    getPatients: () => adminApi.get('/admin/patients'),
+    getDoctorPatientCounts: () => adminApi.get('/admin/doctor-patient-counts'),
+    createDoctor: (doctorData) => adminApi.post('/admin/create-doctor', doctorData),
+    createAdmin: (adminData) => adminApi.post('/admin/create-admin', adminData),
+    getJournals: () => adminApi.get('/admin/journals'),
+    getJournalAssignments: () => adminApi.get('/admin/journal-assignments'),
+    assignJournal: (userId, journalId) => adminApi.post('/admin/assign-journal', { user_id: userId, journal_id: journalId }),
+    revokeJournal: (userId, journalId) => adminApi.post('/admin/revoke-journal', { user_id: userId, journal_id: journalId }),
+};
+
 export default api;

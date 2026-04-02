@@ -8,6 +8,9 @@ import SessionNotes from './components/SessionNotes'
 import SessionRecording from './components/SessionRecording'
 import DSM5Reference from './components/DSM5Reference'
 import Settings from './components/Settings'
+import AdminPage from './components/AdminPage'
+import AdminLogin from './components/AdminLogin'
+import AdminProtectedRoute from './components/AdminProtectedRoute'
 import Journals from './components/Journals'
 import ProtectedRoute from './components/ProtectedRoute'
 import './dashboard.css'
@@ -23,6 +26,7 @@ function App() {
                 <Routes>
                     <Route path="/login" element={<Login />} />
                     <Route path="/signup" element={<Signup />} />
+                    <Route path="/admin-login" element={<AdminLogin />} />
 
                     <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
                         <Route path="/dashboard" element={<Dashboard />} />
@@ -34,6 +38,12 @@ function App() {
                         <Route path="/journals/dsm-5" element={<DSM5Reference />} />
                         <Route path="/settings" element={<Settings />} />
                     </Route>
+
+                    <Route path="/adminpage" element={
+                        <AdminProtectedRoute>
+                            <AdminPage />
+                        </AdminProtectedRoute>
+                    } />
 
                     <Route path="*" element={<Navigate to="/login" replace />} />
                 </Routes>

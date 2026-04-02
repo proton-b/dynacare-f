@@ -45,7 +45,7 @@ const Journals = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {journals.filter(j => j.name === 'DSM-5 Journal' || j.name === 'Harrison Journal').map((journal) => (
+                {journals.map((journal) => (
                     <a
                         key={journal.id}
                         href={journal.url}

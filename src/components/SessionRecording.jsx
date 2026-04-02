@@ -24,8 +24,10 @@ const SessionRecording = () => {
 
   // Clinical summary states
   const [clinicalSummary, setClinicalSummary] = useState(null)
+  const [harrisonSummary, setHarrisonSummary] = useState(null)
   const [showSummaryModal, setShowSummaryModal] = useState(false)
   const [generatingSummary, setGeneratingSummary] = useState(false)
+  const [activeReportTab, setActiveReportTab] = useState('dsm5')
 
   // Mode: 'record' or 'upload'
   const [mode, setMode] = useState('record')
@@ -326,6 +328,8 @@ const SessionRecording = () => {
           console.log('Step 6: Processing summary response:', summaryResponse.data);
           if (summaryResponse.data && summaryResponse.data.success) {
             setClinicalSummary(summaryResponse.data.summary);
+            setHarrisonSummary(summaryResponse.data.harrisonSummary || null);
+            setActiveReportTab('dsm5');
             setShowSummaryModal(true);
           } else {
             throw new Error('Summary generation failed: ' + (summaryResponse.data?.message || 'Unknown error'));
@@ -448,15 +452,20 @@ const SessionRecording = () => {
 
           if (summaryResponse.data && summaryResponse.data.success) {
             setClinicalSummary(summaryResponse.data.summary)
+            setHarrisonSummary(summaryResponse.data.harrisonSummary || null)
+            setActiveReportTab('dsm5')
 
             // Save summary to the recording in the database
             if (recordingId) {
               try {
-                await recordingService.update(recordingId, { summary: summaryResponse.data.summary })
-                // Update the local recordings list with the complete data
+                const combinedSummary = {
+                  dsm5: summaryResponse.data.summary,
+                  harrison: summaryResponse.data.harrisonSummary
+                }
+                await recordingService.update(recordingId, { summary: combinedSummary })
                 setRecordings(prev => prev.map(r =>
                   r.id === recordingId
-                    ? { ...r, transcript: transcriptText, summary: JSON.stringify(summaryResponse.data.summary) }
+                    ? { ...r, transcript: transcriptText, summary: JSON.stringify(combinedSummary) }
                     : r
                 ))
               } catch (updateErr) {
@@ -1083,9 +1092,9 @@ const SessionRecording = () => {
 
       {/* Clinical Summary Modal */}
       {showSummaryModal && clinicalSummary && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-4xl my-8 shadow-2xl overflow-hidden">
-            <div className="bg-indigo-600 px-8 py-6 flex items-center justify-between sticky top-0 z-10">
+        <div className="fixed inset-0 z-50 bg-black bg-opacity-60 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-4xl mx-auto my-8 shadow-2xl flex flex-col max-h-[calc(100vh-4rem)]">
+            <div className="bg-indigo-600 px-8 py-6 flex items-center justify-between flex-shrink-0 rounded-t-2xl">
               <h2 className="text-2xl font-bold text-white">AI Clinical Summary</h2>
               <button onClick={() => setShowSummaryModal(false)} className="text-white hover:text-indigo-100 transition-colors">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1093,58 +1102,243 @@ const SessionRecording = () => {
                 </svg>
               </button>
             </div>
-            <div className="p-8 space-y-8">
-              {/* Summary Content mapping from clinicalSummary would go here, simplified for restoration */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-6 bg-blue-50 rounded-xl border border-blue-100">
-                  <h4 className="text-xs font-bold text-blue-600 uppercase mb-2">Mood & Affect</h4>
-                  <p className="text-slate-800 font-medium">{clinicalSummary.overview.mood} / {clinicalSummary.overview.affect}</p>
-                </div>
-                <div className="p-6 bg-purple-50 rounded-xl border border-purple-100">
-                  <h4 className="text-xs font-bold text-purple-600 uppercase mb-2">Engagement</h4>
-                  <p className="text-slate-800 font-medium">{clinicalSummary.overview.engagement}</p>
-                </div>
-              </div>
 
-              {/* DSM-5 & Symptoms Section - NEW */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-6 bg-indigo-50 rounded-xl border border-indigo-100">
-                  <h4 className="text-xs font-bold text-indigo-600 uppercase mb-3 flex items-center">
-                    <span>🧬 DSM-5 Indications</span>
-                  </h4>
-                  {clinicalSummary.clinicalImpression?.possibleDiagnoses?.length > 0 ? (
-                    <div className="space-y-3">
-                      {clinicalSummary.clinicalImpression.possibleDiagnoses.map((dx, i) => (
-                        <div key={i} className="bg-white p-3 rounded-lg border border-indigo-50 shadow-sm">
-                          <div className="flex justify-between items-start">
-                            <span className="font-bold text-slate-800 text-sm">{dx.name}</span>
-                            <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-mono">{dx.code}</span>
-                          </div>
-                          <p className="text-xs text-slate-500 mt-1">{dx.criteria_met}</p>
+            {/* Report Tab Switcher */}
+            <div className="px-8 pt-6 pb-2 flex space-x-2 flex-shrink-0 border-b border-slate-100">
+              <button
+                onClick={() => setActiveReportTab('dsm5')}
+                className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                  activeReportTab === 'dsm5'
+                    ? 'bg-indigo-600 text-white shadow-lg'
+                    : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                }`}
+              >
+                DSM-5 Report
+              </button>
+              {harrisonSummary && (
+                <button
+                  onClick={() => setActiveReportTab('harrison')}
+                  className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                    activeReportTab === 'harrison'
+                      ? 'bg-emerald-600 text-white shadow-lg'
+                      : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                  }`}
+                >
+                  Harrison Report
+                </button>
+              )}
+            </div>
+
+            <div className="p-8 space-y-8 overflow-y-auto flex-1">
+              {/* DSM-5 Report */}
+              {activeReportTab === 'dsm5' && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="p-6 bg-blue-50 rounded-xl border border-blue-100">
+                      <h4 className="text-xs font-bold text-blue-600 uppercase mb-2">Mood & Affect</h4>
+                      <p className="text-slate-800 font-medium">{clinicalSummary.overview?.mood} / {clinicalSummary.overview?.affect}</p>
+                    </div>
+                    <div className="p-6 bg-purple-50 rounded-xl border border-purple-100">
+                      <h4 className="text-xs font-bold text-purple-600 uppercase mb-2">Engagement</h4>
+                      <p className="text-slate-800 font-medium">{clinicalSummary.overview?.engagement}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="p-6 bg-indigo-50 rounded-xl border border-indigo-100">
+                      <h4 className="text-xs font-bold text-indigo-600 uppercase mb-3">DSM-5 Indications</h4>
+                      {clinicalSummary.clinicalImpression?.possibleDiagnoses?.length > 0 ? (
+                        <div className="space-y-3">
+                          {clinicalSummary.clinicalImpression.possibleDiagnoses.map((dx, i) => (
+                            <div key={i} className="bg-white p-3 rounded-lg border border-indigo-50 shadow-sm">
+                              <div className="flex justify-between items-start">
+                                <span className="font-bold text-slate-800 text-sm">{dx.name}</span>
+                                <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-mono">{dx.code}</span>
+                              </div>
+                              <p className="text-xs text-slate-500 mt-1">{dx.evidence}</p>
+                              <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded font-medium ${
+                                dx.confidence === 'High' ? 'bg-red-100 text-red-700' :
+                                dx.confidence === 'Moderate' ? 'bg-yellow-100 text-yellow-700' :
+                                'bg-slate-100 text-slate-600'
+                              }`}>{dx.confidence} confidence</span>
+                            </div>
+                          ))}
                         </div>
+                      ) : (
+                        <p className="text-slate-500 text-sm italic">No specific DSM-5 matches found.</p>
+                      )}
+                    </div>
+
+                    <div className="p-6 bg-yellow-50 rounded-xl border border-yellow-100">
+                      <h4 className="text-xs font-bold text-yellow-700 uppercase mb-3">Reported Symptoms</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {clinicalSummary.symptoms?.reported?.map((sym, i) => (
+                          <span key={i} className="px-3 py-1 bg-white border border-yellow-200 text-yellow-800 rounded-full text-xs font-medium shadow-sm">
+                            {sym}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="mt-4 pt-4 border-t border-yellow-200/50">
+                        <p className="text-xs font-bold text-yellow-800">Severity Assessment: <span className="font-normal">{clinicalSummary.symptoms?.severity}</span></p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {clinicalSummary.riskAssessment && (
+                    <div className={`p-6 rounded-xl border ${
+                      clinicalSummary.riskAssessment.color === 'red' ? 'bg-red-50 border-red-200' :
+                      clinicalSummary.riskAssessment.color === 'yellow' ? 'bg-amber-50 border-amber-200' :
+                      'bg-green-50 border-green-200'
+                    }`}>
+                      <h4 className="text-xs font-bold uppercase mb-2" style={{ color: clinicalSummary.riskAssessment.color === 'red' ? '#dc2626' : clinicalSummary.riskAssessment.color === 'yellow' ? '#d97706' : '#16a34a' }}>
+                        Risk Assessment: {clinicalSummary.riskAssessment.level}
+                      </h4>
+                      {clinicalSummary.riskAssessment.concerns?.length > 0 && (
+                        <ul className="text-sm text-slate-700 space-y-1 mt-2">
+                          {clinicalSummary.riskAssessment.concerns.map((c, i) => (
+                            <li key={i} className="flex items-start space-x-2"><span>-</span><span>{c}</span></li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {clinicalSummary.treatmentPlan && (
+                    <div className="p-6 bg-slate-50 rounded-xl border border-slate-200">
+                      <h4 className="text-xs font-bold text-slate-600 uppercase mb-3">Treatment Plan</h4>
+                      <ul className="text-sm text-slate-700 space-y-2">
+                        {clinicalSummary.treatmentPlan.recommendations?.map((rec, i) => (
+                          <li key={i} className="flex items-start space-x-2"><span className="text-indigo-500 font-bold">{i+1}.</span><span>{rec}</span></li>
+                        ))}
+                      </ul>
+                      {clinicalSummary.treatmentPlan.followUp && (
+                        <p className="mt-3 text-xs text-slate-500">Follow-up: {clinicalSummary.treatmentPlan.followUp}</p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Harrison Report */}
+              {activeReportTab === 'harrison' && harrisonSummary && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="p-6 bg-emerald-50 rounded-xl border border-emerald-100">
+                      <h4 className="text-xs font-bold text-emerald-600 uppercase mb-2">Primary Medical Concerns</h4>
+                      <ul className="text-sm text-slate-700 space-y-1">
+                        {harrisonSummary.overview?.primaryConcerns?.map((c, i) => (
+                          <li key={i} className="flex items-start space-x-2"><span>-</span><span>{c}</span></li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="p-6 bg-teal-50 rounded-xl border border-teal-100">
+                      <h4 className="text-xs font-bold text-teal-600 uppercase mb-2">Systems Involved</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {harrisonSummary.overview?.systemsInvolved?.map((sys, i) => (
+                          <span key={i} className="px-3 py-1 bg-white border border-teal-200 text-teal-700 rounded-full text-xs font-medium">
+                            {sys}
+                          </span>
+                        ))}
+                      </div>
+                      {harrisonSummary.overview?.vitalSignConcerns && (
+                        <p className="mt-3 text-xs text-slate-500">{harrisonSummary.overview.vitalSignConcerns}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Possible Medical Conditions */}
+                  <div className="p-6 bg-emerald-50 rounded-xl border border-emerald-100">
+                    <h4 className="text-xs font-bold text-emerald-600 uppercase mb-3">Possible Medical Conditions (Harrison's Reference)</h4>
+                    {harrisonSummary.medicalFindings?.possibleConditions?.length > 0 ? (
+                      <div className="space-y-3">
+                        {harrisonSummary.medicalFindings.possibleConditions.map((cond, i) => (
+                          <div key={i} className="bg-white p-4 rounded-lg border border-emerald-100 shadow-sm">
+                            <div className="flex justify-between items-start">
+                              <span className="font-bold text-slate-800 text-sm">{cond.condition}</span>
+                              {cond.icdCode && (
+                                <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded font-mono">{cond.icdCode}</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1">{cond.evidence}</p>
+                            {cond.harrisonReference && (
+                              <p className="text-xs text-emerald-600 mt-1 font-medium">Ref: {cond.harrisonReference}</p>
+                            )}
+                            <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded font-medium ${
+                              cond.confidence === 'High' ? 'bg-red-100 text-red-700' :
+                              cond.confidence === 'Moderate' ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-slate-100 text-slate-600'
+                            }`}>{cond.confidence} confidence</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-sm italic">No specific medical conditions identified.</p>
+                    )}
+                  </div>
+
+                  {/* Reported Medical Symptoms */}
+                  <div className="p-6 bg-yellow-50 rounded-xl border border-yellow-100">
+                    <h4 className="text-xs font-bold text-yellow-700 uppercase mb-3">Reported Medical Symptoms</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {harrisonSummary.medicalFindings?.reportedSymptoms?.map((sym, i) => (
+                        <span key={i} className="px-3 py-1 bg-white border border-yellow-200 text-yellow-800 rounded-full text-xs font-medium shadow-sm">
+                          {sym}
+                        </span>
                       ))}
                     </div>
-                  ) : (
-                    <p className="text-slate-500 text-sm italic">No specific DSM-5 matches found.</p>
-                  )}
-                </div>
+                    {harrisonSummary.medicalFindings?.differentialDiagnosis?.length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-yellow-200/50">
+                        <p className="text-xs font-bold text-yellow-800 mb-2">Differential Diagnosis:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {harrisonSummary.medicalFindings.differentialDiagnosis.map((dd, i) => (
+                            <span key={i} className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-xs">{dd}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-                <div className="p-6 bg-yellow-50 rounded-xl border border-yellow-100">
-                  <h4 className="text-xs font-bold text-yellow-700 uppercase mb-3 flex items-center">
-                    <span>🔍 Reported Symptoms</span>
-                  </h4>
-                  <div className="flex flex-wrap gap-2">
-                    {clinicalSummary.symptoms?.reported?.map((sym, i) => (
-                      <span key={i} className="px-3 py-1 bg-white border border-yellow-200 text-yellow-800 rounded-full text-xs font-medium shadow-sm">
-                        {sym}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="mt-4 pt-4 border-t border-yellow-200/50">
-                    <p className="text-xs font-bold text-yellow-800">Severity Assessment: <span className="font-normal">{clinicalSummary.symptoms?.severity}</span></p>
-                  </div>
-                </div>
-              </div>
+                  {/* Lab Recommendations */}
+                  {harrisonSummary.labRecommendations?.suggestedTests?.length > 0 && (
+                    <div className="p-6 bg-blue-50 rounded-xl border border-blue-100">
+                      <h4 className="text-xs font-bold text-blue-600 uppercase mb-3">Recommended Lab Tests</h4>
+                      <div className="space-y-2">
+                        {harrisonSummary.labRecommendations.suggestedTests.map((test, i) => (
+                          <div key={i} className="bg-white p-3 rounded-lg border border-blue-50 shadow-sm">
+                            <span className="font-semibold text-slate-800 text-sm">{test.test}</span>
+                            <p className="text-xs text-slate-500 mt-0.5">{test.reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Treatment Plan */}
+                  {harrisonSummary.treatmentPlan && (
+                    <div className="p-6 bg-slate-50 rounded-xl border border-slate-200">
+                      <h4 className="text-xs font-bold text-slate-600 uppercase mb-3">Medical Treatment Plan</h4>
+                      <ul className="text-sm text-slate-700 space-y-2">
+                        {harrisonSummary.treatmentPlan.recommendations?.map((rec, i) => (
+                          <li key={i} className="flex items-start space-x-2"><span className="text-emerald-500 font-bold">{i+1}.</span><span>{rec}</span></li>
+                        ))}
+                      </ul>
+                      {harrisonSummary.treatmentPlan.referrals?.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-slate-200">
+                          <p className="text-xs font-bold text-slate-600 mb-1">Specialist Referrals:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {harrisonSummary.treatmentPlan.referrals.map((ref, i) => (
+                              <span key={i} className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs font-medium">{ref}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {harrisonSummary.treatmentPlan.followUp && (
+                        <p className="mt-3 text-xs text-slate-500">Follow-up: {harrisonSummary.treatmentPlan.followUp}</p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
 
               <div className="mt-8 flex items-center justify-end space-x-4">
                 <button
@@ -1154,20 +1348,20 @@ const SessionRecording = () => {
                       state: {
                         transcript: transcriptText,
                         summary: clinicalSummary,
+                        harrisonSummary: harrisonSummary,
                         patientId: selectedPatient
                       }
                     });
                   }}
                   className="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-200 transition-all flex items-center space-x-2"
                 >
-                  <span>📝</span>
                   <span>Create Session Notes</span>
                 </button>
                 <button
                   onClick={() => {
                     const selectedPatientData = patients.find(p => p.id === parseInt(selectedPatient));
                     const patientName = selectedPatientData?.full_name || 'Patient';
-                    exportClinicalSummaryToPDF(clinicalSummary, patientName);
+                    exportClinicalSummaryToPDF(clinicalSummary, patientName, harrisonSummary);
                   }}
                   className="px-6 py-3 bg-white border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50 font-bold rounded-xl transition-all flex items-center space-x-2"
                 >
@@ -1187,8 +1381,8 @@ const SessionRecording = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl p-8 shadow-2xl text-center">
             <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <h3 className="text-xl font-bold text-slate-800 mb-2">Generating Clinical Summary...</h3>
-            <p className="text-slate-500">Analyzing transcript with AI</p>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">Generating Clinical Reports...</h3>
+            <p className="text-slate-500">Analyzing transcript with DSM-5 & Harrison's references</p>
           </div>
         </div>
       )}

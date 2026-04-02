@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-export const exportClinicalSummaryToPDF = (summary, patientName) => {
+export const exportClinicalSummaryToPDF = (summary, patientName, harrisonSummary = null) => {
     try {
         console.log('Starting PDF export...');
         console.log('Summary data:', summary);
@@ -159,8 +159,119 @@ export const exportClinicalSummaryToPDF = (summary, patientName) => {
         });
         yPosition = doc.lastAutoTable.finalY + 15;
 
-        // --- Treatment Plan ---
-        if (yPosition > pageHeight - 80) { doc.addPage(); yPosition = 20; }
+        // --- Harrison Report (if available) ---
+        if (harrisonSummary) {
+            doc.addPage();
+            yPosition = 20;
+
+            // Harrison Header
+            doc.setFillColor(5, 150, 105); // Emerald-600
+            doc.rect(0, 0, pageWidth, 30, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(16);
+            doc.setFont(undefined, 'bold');
+            doc.text("Harrison's Principles of Internal Medicine - Report", 20, 20);
+            yPosition = 45;
+
+            // Systems Involved
+            if (harrisonSummary.overview?.systemsInvolved?.length > 0) {
+                yPosition = addSectionHeader('Systems Involved', yPosition);
+                autoTable(doc, {
+                    startY: yPosition,
+                    body: harrisonSummary.overview.systemsInvolved.map(s => [s]),
+                    theme: 'striped',
+                    styles: { fontSize: 10, cellPadding: 5 },
+                    margin: { left: 14, right: 14 },
+                    alternateRowStyles: { fillColor: [236, 253, 245] },
+                });
+                yPosition = doc.lastAutoTable.finalY + 15;
+            }
+
+            // Possible Medical Conditions
+            if (harrisonSummary.medicalFindings?.possibleConditions?.length > 0) {
+                if (yPosition > pageHeight - 80) { doc.addPage(); yPosition = 20; }
+                yPosition = addSectionHeader('Medical Conditions (Harrison Reference)', yPosition);
+                autoTable(doc, {
+                    startY: yPosition,
+                    head: [['Condition', 'ICD Code', 'Confidence', 'Reference']],
+                    body: harrisonSummary.medicalFindings.possibleConditions.map(c => [
+                        c.condition,
+                        c.icdCode || 'N/A',
+                        c.confidence,
+                        c.harrisonReference || 'N/A'
+                    ]),
+                    theme: 'grid',
+                    headStyles: { fillColor: [5, 150, 105] },
+                    styles: { fontSize: 9, cellPadding: 5 },
+                    margin: { left: 14, right: 14 },
+                });
+                yPosition = doc.lastAutoTable.finalY + 15;
+            }
+
+            // Lab Recommendations
+            if (harrisonSummary.labRecommendations?.suggestedTests?.length > 0) {
+                if (yPosition > pageHeight - 80) { doc.addPage(); yPosition = 20; }
+                yPosition = addSectionHeader('Recommended Lab Tests', yPosition);
+                autoTable(doc, {
+                    startY: yPosition,
+                    head: [['Test', 'Reason']],
+                    body: harrisonSummary.labRecommendations.suggestedTests.map(t => [t.test, t.reason]),
+                    theme: 'grid',
+                    headStyles: { fillColor: [5, 150, 105] },
+                    styles: { fontSize: 9, cellPadding: 5 },
+                    margin: { left: 14, right: 14 },
+                });
+                yPosition = doc.lastAutoTable.finalY + 15;
+            }
+
+            // Harrison Treatment Plan
+            if (harrisonSummary.treatmentPlan?.recommendations?.length > 0) {
+                if (yPosition > pageHeight - 80) { doc.addPage(); yPosition = 20; }
+                yPosition = addSectionHeader('Medical Treatment Recommendations', yPosition);
+                autoTable(doc, {
+                    startY: yPosition,
+                    head: [['#', 'Recommendation']],
+                    body: harrisonSummary.treatmentPlan.recommendations.map((rec, idx) => [
+                        (idx + 1).toString(),
+                        rec
+                    ]),
+                    theme: 'striped',
+                    headStyles: { fillColor: [5, 150, 105] },
+                    styles: { fontSize: 10, cellPadding: 6 },
+                    margin: { left: 14, right: 14 },
+                });
+                yPosition = doc.lastAutoTable.finalY + 10;
+            }
+
+            // Specialist Referrals
+            if (harrisonSummary.treatmentPlan?.referrals?.length > 0) {
+                if (yPosition > pageHeight - 40) { doc.addPage(); yPosition = 20; }
+                doc.setFillColor(236, 253, 245);
+                doc.roundedRect(14, yPosition, pageWidth - 28, 12, 1, 1, 'F');
+                doc.setFontSize(10);
+                doc.setTextColor(...colors.text);
+                doc.setFont(undefined, 'bold');
+                doc.text(`Specialist Referrals: ${harrisonSummary.treatmentPlan.referrals.join(', ')}`, 18, yPosition + 8);
+                yPosition += 20;
+            }
+        }
+
+        // --- Treatment Plan (DSM-5) ---
+        if (!harrisonSummary) { // Only add if no Harrison page was added (otherwise it's already on a new page)
+            if (yPosition > pageHeight - 80) { doc.addPage(); yPosition = 20; }
+        } else {
+            doc.addPage();
+            yPosition = 20;
+
+            // DSM-5 treatment header on new page
+            doc.setFillColor(...colors.primary);
+            doc.rect(0, 0, pageWidth, 30, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(16);
+            doc.setFont(undefined, 'bold');
+            doc.text('DSM-5 Treatment Plan & Next Steps', 20, 20);
+            yPosition = 45;
+        }
         yPosition = addSectionHeader('Treatment Recommendations', yPosition);
 
         autoTable(doc, {
