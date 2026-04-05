@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { patientService, recordingService } from '../services/api'
+import { patientService, recordingService, journalService, sessionService } from '../services/api'
 import { exportClinicalSummaryToPDF } from '../utils/pdfExport'
 
 const SessionRecording = () => {
@@ -42,6 +42,16 @@ const SessionRecording = () => {
   const [uploadStep, setUploadStep] = useState('') // 'uploading' | 'transcribing' | 'summarizing'
   const fileInputRef = useRef(null)
 
+  // Journal selection
+  const [availableJournals, setAvailableJournals] = useState([])
+  const [selectedJournals, setSelectedJournals] = useState([])
+  const [journalDropdownOpen, setJournalDropdownOpen] = useState(false)
+  const journalDropdownRef = useRef(null)
+
+  // Session tracking
+  const [currentSessionId, setCurrentSessionId] = useState(null)
+  const [currentRecordingId, setCurrentRecordingId] = useState(null)
+
   // Language selection
   const [selectedLang, setSelectedLang] = useState('en-IN')
   const supportedLanguages = [
@@ -74,12 +84,14 @@ const SessionRecording = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [patientsRes, recordingsRes] = await Promise.all([
+        const [patientsRes, recordingsRes, journalsRes] = await Promise.all([
           patientService.getAll(),
-          recordingService.getAll()
+          recordingService.getAll(),
+          journalService.getMyJournals()
         ]);
         setPatients(patientsRes.data);
         setRecordings(recordingsRes.data);
+        setAvailableJournals(journalsRes.data || []);
       } catch (err) {
         console.error("Error fetching recording data:", err);
       } finally {
@@ -93,6 +105,9 @@ const SessionRecording = () => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsDropdownOpen(false);
+      }
+      if (journalDropdownRef.current && !journalDropdownRef.current.contains(event.target)) {
+        setJournalDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -267,6 +282,16 @@ const SessionRecording = () => {
     }
   }
 
+  const toggleJournal = (journalId) => {
+    setSelectedJournals(prev =>
+      prev.includes(journalId) ? prev.filter(id => id !== journalId) : [...prev, journalId]
+    )
+  }
+
+  const getSelectedJournalNames = () => {
+    return availableJournals.filter(j => selectedJournals.includes(j.id)).map(j => j.name)
+  }
+
   const handleStopRecording = async () => {
     console.log('Stop recording button clicked');
 
@@ -295,13 +320,19 @@ const SessionRecording = () => {
       setIsRecording(false)
       setIsPaused(false)
 
-      console.log('Step 2: Preparing data for upload...');
+      console.log('Step 2: Creating session...');
+      const sessionRes = await sessionService.create({ patient_id: selectedPatient });
+      const sessionId = sessionRes.data.id;
+      setCurrentSessionId(sessionId);
+
+      console.log('Step 3: Preparing data for upload...');
       const transcriptText = (transcript || []).map(t => t?.text || '').join(' ');
       const newRecordingData = {
         patient_id: selectedPatient,
         duration: formatTime(recordingTime),
         audio_url: 'recorded_session_' + Date.now(),
         transcript: transcriptText,
+        session_id: sessionId,
         file_size: `${(recordingTime * 0.1).toFixed(1)} MB`,
         format: 'wav'
       }
@@ -311,6 +342,7 @@ const SessionRecording = () => {
 
       if (response.data) {
         setRecordings(prev => [response.data, ...prev]);
+        setCurrentRecordingId(response.data.id);
       }
       setRecordingTime(0);
 
@@ -322,14 +354,15 @@ const SessionRecording = () => {
           const summaryResponse = await recordingService.generateClinicalSummary({
             transcript: transcriptText,
             patient_id: selectedPatient,
-            duration: formatTime(recordingTime)
+            duration: formatTime(recordingTime),
+            journals: getSelectedJournalNames()
           });
 
           console.log('Step 6: Processing summary response:', summaryResponse.data);
           if (summaryResponse.data && summaryResponse.data.success) {
-            setClinicalSummary(summaryResponse.data.summary);
+            setClinicalSummary(summaryResponse.data.summary || null);
             setHarrisonSummary(summaryResponse.data.harrisonSummary || null);
-            setActiveReportTab('dsm5');
+            setActiveReportTab(summaryResponse.data.summary ? 'dsm5' : 'harrison');
             setShowSummaryModal(true);
           } else {
             throw new Error('Summary generation failed: ' + (summaryResponse.data?.message || 'Unknown error'));
@@ -382,12 +415,19 @@ const SessionRecording = () => {
     setUploadStep('uploading')
 
     let recordingId = null
+    let sessionId = null
 
     try {
+      // Step 0: Create session
+      const sessionRes = await sessionService.create({ patient_id: selectedPatient })
+      sessionId = sessionRes.data.id
+      setCurrentSessionId(sessionId)
+
       // Step 1: Upload the audio file with progress tracking
       const formData = new FormData()
       formData.append('audio', uploadFile)
       formData.append('patient_id', selectedPatient)
+      formData.append('session_id', sessionId)
       if (uploadDuration) formData.append('duration', uploadDuration)
       if (uploadNotes) formData.append('notes', uploadNotes)
 
@@ -398,6 +438,7 @@ const SessionRecording = () => {
 
       if (response.data) {
         recordingId = response.data.id
+        setCurrentRecordingId(recordingId)
         setRecordings(prev => [response.data, ...prev])
       }
 
@@ -447,20 +488,21 @@ const SessionRecording = () => {
           const summaryResponse = await recordingService.generateClinicalSummary({
             transcript: transcriptText,
             patient_id: selectedPatient,
-            duration: uploadDuration || 'N/A'
+            duration: uploadDuration || 'N/A',
+            journals: getSelectedJournalNames()
           })
 
           if (summaryResponse.data && summaryResponse.data.success) {
-            setClinicalSummary(summaryResponse.data.summary)
+            setClinicalSummary(summaryResponse.data.summary || null)
             setHarrisonSummary(summaryResponse.data.harrisonSummary || null)
-            setActiveReportTab('dsm5')
+            setActiveReportTab(summaryResponse.data.summary ? 'dsm5' : 'harrison')
 
             // Save summary to the recording in the database
             if (recordingId) {
               try {
                 const combinedSummary = {
-                  dsm5: summaryResponse.data.summary,
-                  harrison: summaryResponse.data.harrisonSummary
+                  ...(summaryResponse.data.summary && { dsm5: summaryResponse.data.summary }),
+                  ...(summaryResponse.data.harrisonSummary && { harrison: summaryResponse.data.harrisonSummary })
                 }
                 await recordingService.update(recordingId, { summary: combinedSummary })
                 setRecordings(prev => prev.map(r =>
@@ -665,6 +707,87 @@ const SessionRecording = () => {
                 </select>
                 <p className="text-xs text-slate-400 mt-1.5">Select the language being spoken in the session</p>
               </div>
+
+              {/* Journal Selection */}
+              {availableJournals.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Reference Journals</label>
+                  <p className="text-xs text-slate-400 mb-3">Select journals to reference in the clinical report</p>
+                  <div className="relative" ref={journalDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => !isRecording && setJournalDropdownOpen(!journalDropdownOpen)}
+                      disabled={isRecording}
+                      className={`w-full px-4 py-3 border-2 rounded-xl text-left text-sm font-medium transition-all flex items-center justify-between ${isRecording ? 'opacity-60 cursor-not-allowed bg-slate-50 border-slate-200' : journalDropdownOpen ? 'border-primary-500 ring-4 ring-primary-100' : 'border-slate-200 hover:border-slate-300'}`}
+                    >
+                      <span className={selectedJournals.length > 0 ? 'text-slate-700' : 'text-slate-400'}>
+                        {selectedJournals.length > 0
+                          ? `${selectedJournals.length} journal${selectedJournals.length > 1 ? 's' : ''} selected`
+                          : 'Select journals (optional)'}
+                      </span>
+                      <svg className={`w-4 h-4 text-slate-400 transition-transform ${journalDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {journalDropdownOpen && !isRecording && (
+                      <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-60 overflow-y-auto">
+                        <div className="p-2 space-y-1">
+                          {availableJournals.map(journal => {
+                            const isSelected = selectedJournals.includes(journal.id)
+                            return (
+                              <button
+                                key={journal.id}
+                                onClick={() => toggleJournal(journal.id)}
+                                className={`w-full text-left p-3 rounded-lg flex items-center space-x-3 transition-colors ${isSelected ? 'bg-primary-50 border border-primary-200' : 'hover:bg-slate-50'}`}
+                              >
+                                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-primary-600 border-primary-600' : 'border-slate-300'}`}>
+                                  {isSelected && (
+                                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-slate-800 truncate">{journal.name}</p>
+                                  {journal.target_audience && (
+                                    <p className="text-[10px] text-slate-400 uppercase tracking-wider">{journal.target_audience}</p>
+                                  )}
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Selected journal chips */}
+                  {selectedJournals.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {availableJournals.filter(j => selectedJournals.includes(j.id)).map(journal => (
+                        <span
+                          key={journal.id}
+                          className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-primary-50 text-primary-700 text-xs font-semibold rounded-lg border border-primary-200"
+                        >
+                          <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                          </svg>
+                          <span className="truncate max-w-[150px]">{journal.name}</span>
+                          <button
+                            onClick={() => toggleJournal(journal.id)}
+                            className="hover:text-red-600 transition-colors"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Upload Audio Interface */}
@@ -1091,7 +1214,7 @@ const SessionRecording = () => {
       </div>
 
       {/* Clinical Summary Modal */}
-      {showSummaryModal && clinicalSummary && (
+      {showSummaryModal && (clinicalSummary || harrisonSummary) && (
         <div className="fixed inset-0 z-50 bg-black bg-opacity-60 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-2xl w-full max-w-4xl mx-auto my-8 shadow-2xl flex flex-col max-h-[calc(100vh-4rem)]">
             <div className="bg-indigo-600 px-8 py-6 flex items-center justify-between flex-shrink-0 rounded-t-2xl">
@@ -1105,16 +1228,18 @@ const SessionRecording = () => {
 
             {/* Report Tab Switcher */}
             <div className="px-8 pt-6 pb-2 flex space-x-2 flex-shrink-0 border-b border-slate-100">
-              <button
-                onClick={() => setActiveReportTab('dsm5')}
-                className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
-                  activeReportTab === 'dsm5'
-                    ? 'bg-indigo-600 text-white shadow-lg'
-                    : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
-                }`}
-              >
-                DSM-5 Report
-              </button>
+              {clinicalSummary && (
+                <button
+                  onClick={() => setActiveReportTab('dsm5')}
+                  className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                    activeReportTab === 'dsm5'
+                      ? 'bg-indigo-600 text-white shadow-lg'
+                      : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                  }`}
+                >
+                  DSM-5 Report
+                </button>
+              )}
               {harrisonSummary && (
                 <button
                   onClick={() => setActiveReportTab('harrison')}
@@ -1349,7 +1474,9 @@ const SessionRecording = () => {
                         transcript: transcriptText,
                         summary: clinicalSummary,
                         harrisonSummary: harrisonSummary,
-                        patientId: selectedPatient
+                        patientId: selectedPatient,
+                        sessionId: currentSessionId,
+                        recordingId: currentRecordingId
                       }
                     });
                   }}
@@ -1381,8 +1508,12 @@ const SessionRecording = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl p-8 shadow-2xl text-center">
             <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <h3 className="text-xl font-bold text-slate-800 mb-2">Generating Clinical Reports...</h3>
-            <p className="text-slate-500">Analyzing transcript with DSM-5 & Harrison's references</p>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">Generating Clinical Report{selectedJournals.length !== 1 ? 's' : ''}...</h3>
+            <p className="text-slate-500">
+              {selectedJournals.length > 0
+                ? `Analyzing transcript with ${getSelectedJournalNames().join(', ')}`
+                : 'Analyzing transcript with DSM-5 & Harrison\'s references'}
+            </p>
           </div>
         </div>
       )}

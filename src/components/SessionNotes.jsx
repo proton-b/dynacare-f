@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { noteService, aiService, imageService, patientService, recordingService } from '../services/api'
+import { noteService, aiService, imageService, patientService, recordingService, assessmentService, sessionService } from '../services/api'
 import ImageAnnotationOverlay from './ImageAnnotationOverlay'
 import { exportClinicalSummaryToPDF } from '../utils/pdfExport'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 const API_URL = import.meta.env.VITE_BACKEND_URL
 
@@ -31,6 +32,36 @@ const SessionNotes = () => {
     const [viewingNote, setViewingNote] = useState(null)
     const [exportFormat, setExportFormat] = useState('PDF')
 
+    // Edit past note state
+    const [editingNoteId, setEditingNoteId] = useState(null)
+    const [patientSessions, setPatientSessions] = useState([]) // notes for selected patient
+    const [selectedSessionId, setSelectedSessionId] = useState('')
+    const [patientRecordingsMap, setPatientRecordingsMap] = useState([]) // recordings for selected patient
+
+    // Connected session flow state
+    const [currentSessionId, setCurrentSessionId] = useState(location.state?.sessionId || null)
+    const [currentRecordingId, setCurrentRecordingId] = useState(location.state?.recordingId || null)
+    const [apiSessions, setApiSessions] = useState([]) // sessions from the sessions API
+
+    // Assessment state
+    const [assessmentLink, setAssessmentLink] = useState('')
+    const [assessmentLinkLoading, setAssessmentLinkLoading] = useState(false)
+    const [assessmentResponses, setAssessmentResponses] = useState([])   // PHQ9
+    const [gad7Responses, setGad7Responses] = useState([])
+    const [pcl5Responses, setPcl5Responses] = useState([])
+    const [auditResponses, setAuditResponses] = useState([])
+    const [cageResponses, setCageResponses] = useState([])
+    const [mdqResponses, setMdqResponses] = useState([])
+    const [assessmentResponsesLoading, setAssessmentResponsesLoading] = useState(false)
+    const [linkCopied, setLinkCopied] = useState(false)
+    const [assessmentMenuOpen, setAssessmentMenuOpen] = useState(null)
+    const [chartFilter, setChartFilter] = useState('all')
+    const [chartXAxis, setChartXAxis] = useState('attempt') // 'attempt' or 'date'
+
+    // Export tab state
+    const [exportSelectedNoteId, setExportSelectedNoteId] = useState('current')
+    const [exportIncludeReport, setExportIncludeReport] = useState(true)
+
     // Upload audio states
     const [uploadFile, setUploadFile] = useState(null)
     const [uploading, setUploading] = useState(false)
@@ -46,11 +77,21 @@ const SessionNotes = () => {
     const fileInputRef = useRef(null)
     const noteViewContentRef = useRef(null)
 
+    const [expandedSessionId, setExpandedSessionId] = useState(null)
+    const [expandedSessionSection, setExpandedSessionSection] = useState(null) // 'notes'|'transcript'|'report'|'audio'|'scores'
+
     const getImageUrl = (imageUrl) => {
         if (!imageUrl) return ''
         if (imageUrl.startsWith('http')) return imageUrl
         const baseUrl = API_URL.replace('/api', '')
         return `${baseUrl}${imageUrl}`
+    }
+
+    const getAudioUrl = (audioUrl) => {
+        if (!audioUrl) return ''
+        if (audioUrl.startsWith('http')) return audioUrl
+        const baseUrl = API_URL.replace('/api', '')
+        return `${baseUrl}${audioUrl}`
     }
 
     useEffect(() => {
@@ -79,6 +120,104 @@ const SessionNotes = () => {
         fetchPatients()
         fetchSavedNotes()
     }, [])
+
+    // Fetch past notes and recordings when patient changes
+    useEffect(() => {
+        if (!selectedPatientId) {
+            setPatientSessions([])
+            setPatientRecordingsMap([])
+            setSelectedSessionId('')
+            setEditingNoteId(null)
+            return
+        }
+        const fetchPatientData = async () => {
+            try {
+                const [notesRes, recRes, sessRes] = await Promise.all([
+                    noteService.getByPatientId(selectedPatientId),
+                    recordingService.getByPatientId(selectedPatientId),
+                    sessionService.getByPatientId(selectedPatientId)
+                ])
+                setPatientSessions(notesRes.data || [])
+                setPatientRecordingsMap(recRes.data || [])
+                setApiSessions(sessRes.data || [])
+            } catch (err) {
+                console.error('Error fetching patient sessions:', err)
+            }
+        }
+        fetchPatientData()
+        // Clear session selection when patient changes
+        setSelectedSessionId('')
+        setEditingNoteId(null)
+    }, [selectedPatientId])
+
+    // Load note + matching recording when session is selected
+    useEffect(() => {
+        if (!selectedSessionId) return
+        const note = patientSessions.find(n => String(n.id) === String(selectedSessionId))
+        if (!note) return
+
+        // Load note content into editor
+        if (editorRef.current) {
+            editorRef.current.innerHTML = note.content || ''
+            setNoteContent(note.content || '')
+        }
+
+        // Load AI insights
+        if (note.ai_insights) {
+            try {
+                const insights = typeof note.ai_insights === 'string' ? JSON.parse(note.ai_insights) : note.ai_insights
+                setAiSummary(insights)
+                setClinicalSummary(insights)
+            } catch {
+                setAiSummary(null)
+                setClinicalSummary(null)
+            }
+        } else {
+            setAiSummary(null)
+            setClinicalSummary(null)
+        }
+
+        // Find matching recording (closest in time, within 30 min window)
+        const noteTime = new Date(note.created_at).getTime()
+        const matchingRec = patientRecordingsMap.find(r => {
+            const recTime = new Date(r.created_at).getTime()
+            return Math.abs(recTime - noteTime) < 30 * 60 * 1000
+        })
+        if (matchingRec?.transcript) {
+            setTranscriptData(matchingRec.transcript)
+        } else {
+            setTranscriptData(null)
+        }
+
+        // If the recording has a summary but note doesn't have ai_insights, use recording's
+        if (!note.ai_insights && matchingRec?.summary) {
+            try {
+                const summary = typeof matchingRec.summary === 'string' ? JSON.parse(matchingRec.summary) : matchingRec.summary
+                setAiSummary(summary)
+                setClinicalSummary(summary)
+            } catch {}
+        }
+
+        setEditingNoteId(note.id)
+        setActiveTab('editor')
+    }, [selectedSessionId])
+
+    // Handler to start a new note (clear editing state)
+    const handleNewNote = () => {
+        setEditingNoteId(null)
+        setSelectedSessionId('')
+        setNoteContent('')
+        setAiSummary(null)
+        setClinicalSummary(null)
+        setTranscriptData(null)
+        setSymptomReport(null)
+        setCurrentSessionId(null)
+        setCurrentRecordingId(null)
+        if (editorRef.current) {
+            editorRef.current.innerHTML = ''
+        }
+        setActiveTab('editor')
+    }
 
     // Save cursor position before opening image picker
     const saveSelection = () => {
@@ -758,12 +897,37 @@ const SessionNotes = () => {
                 appointment_id: location.state?.appointmentId || null,
                 content: content,
                 status: 'Finalized',
-                ai_insights: aiSummary ? JSON.stringify(aiSummary) : null
+                ai_insights: aiSummary ? JSON.stringify(aiSummary) : null,
+                session_id: currentSessionId || null
             };
 
-            await noteService.create(noteData);
+            if (editingNoteId) {
+                // Update existing note
+                await noteService.update(editingNoteId, noteData);
+                alert("Note updated successfully!");
+            } else {
+                // Create new note
+                await noteService.create(noteData);
+                if (currentSessionId) {
+                    alert("Note saved! You can now send assessments for this session.");
+                    setActiveTab('assessments');
+                } else {
+                    alert("Note saved and finalized successfully!");
+                }
+            }
             fetchSavedNotes();
-            alert("Note saved and finalized successfully!");
+            // Refresh patient sessions list
+            if (selectedPatientId) {
+                const notesRes = await noteService.getByPatientId(selectedPatientId)
+                setPatientSessions(notesRes.data || [])
+            }
+            // Refresh sessions from API
+            if (selectedPatientId) {
+                try {
+                    const sessRes = await sessionService.getByPatientId(selectedPatientId)
+                    setApiSessions(sessRes.data || [])
+                } catch {}
+            }
         } catch (error) {
             console.error("Error saving note:", error);
             alert("Failed to save note: " + (error.response?.data?.message || error.message));
@@ -772,16 +936,373 @@ const SessionNotes = () => {
         }
     }
 
+    // Fetch assessment responses when patient changes
+    useEffect(() => {
+        if (!selectedPatientId) {
+            setAssessmentResponses([]); setGad7Responses([]); setPcl5Responses([]); setAuditResponses([]); setCageResponses([]); setMdqResponses([])
+            return
+        }
+        const fetchResponses = async () => {
+            setAssessmentResponsesLoading(true)
+            try {
+                const [phq9Res, gad7Res, pcl5Res, auditRes, cageRes, mdqRes] = await Promise.all([
+                    assessmentService.getResponses(selectedPatientId, 'PHQ9'),
+                    assessmentService.getResponses(selectedPatientId, 'GAD7'),
+                    assessmentService.getResponses(selectedPatientId, 'PCL5'),
+                    assessmentService.getResponses(selectedPatientId, 'AUDIT'),
+                    assessmentService.getResponses(selectedPatientId, 'CAGE'),
+                    assessmentService.getResponses(selectedPatientId, 'MDQ'),
+                ])
+                setAssessmentResponses(phq9Res.data || [])
+                setGad7Responses(gad7Res.data || [])
+                setPcl5Responses(pcl5Res.data || [])
+                setAuditResponses(auditRes.data || [])
+                setCageResponses(cageRes.data || [])
+                setMdqResponses(mdqRes.data || [])
+            } catch (err) {
+                console.error('Error fetching assessment responses:', err)
+            } finally {
+                setAssessmentResponsesLoading(false)
+            }
+        }
+        fetchResponses()
+    }, [selectedPatientId])
+
+    const handleGenerateAssessmentLink = async (assessmentType, openInTab = false) => {
+        if (!selectedPatientId) {
+            alert('Please select a patient first.')
+            return
+        }
+        setAssessmentLinkLoading(true)
+        setAssessmentLink('')
+        setLinkCopied(false)
+        setAssessmentMenuOpen(null)
+        try {
+            const res = await assessmentService.createToken({ patient_id: parseInt(selectedPatientId), assessment_type: assessmentType, session_id: currentSessionId || null })
+            const baseUrl = window.location.origin
+            const link = `${baseUrl}/assessment/${assessmentType.toLowerCase()}/${res.data.token}`
+            if (openInTab) {
+                window.open(link, '_blank')
+            } else {
+                setAssessmentLink(link)
+            }
+        } catch (err) {
+            console.error('Error generating assessment link:', err)
+            alert('Failed to generate link.')
+        } finally {
+            setAssessmentLinkLoading(false)
+        }
+    }
+
+    const handleCopyLink = () => {
+        navigator.clipboard.writeText(assessmentLink)
+        setLinkCopied(true)
+        setTimeout(() => setLinkCopied(false), 2000)
+    }
+
+    const getPhq9Interpretation = (score) => {
+        if (score <= 4) return { label: 'Minimal', color: 'text-green-700', bg: 'bg-green-100' }
+        if (score <= 9) return { label: 'Mild', color: 'text-yellow-700', bg: 'bg-yellow-100' }
+        if (score <= 14) return { label: 'Moderate', color: 'text-orange-700', bg: 'bg-orange-100' }
+        if (score <= 19) return { label: 'Moderately Severe', color: 'text-red-600', bg: 'bg-red-100' }
+        return { label: 'Severe', color: 'text-red-800', bg: 'bg-red-200' }
+    }
+
+    const getGad7Interpretation = (score) => {
+        if (score <= 4) return { label: 'Minimal', color: 'text-green-700', bg: 'bg-green-100' }
+        if (score <= 9) return { label: 'Mild', color: 'text-yellow-700', bg: 'bg-yellow-100' }
+        if (score <= 14) return { label: 'Moderate', color: 'text-orange-700', bg: 'bg-orange-100' }
+        return { label: 'Severe', color: 'text-red-800', bg: 'bg-red-200' }
+    }
+
+    const getPcl5Interpretation = (score) => {
+        if (score <= 10) return { label: 'Minimal', color: 'text-green-700', bg: 'bg-green-100' }
+        if (score <= 25) return { label: 'Mild', color: 'text-yellow-700', bg: 'bg-yellow-100' }
+        if (score <= 40) return { label: 'Moderate', color: 'text-orange-700', bg: 'bg-orange-100' }
+        return { label: 'Severe', color: 'text-red-800', bg: 'bg-red-200' }
+    }
+
+    const getAuditInterpretation = (score) => {
+        if (score <= 3) return { label: 'Low Risk', color: 'text-green-700', bg: 'bg-green-100' }
+        if (score <= 9) return { label: 'Risky', color: 'text-yellow-700', bg: 'bg-yellow-100' }
+        if (score <= 13) return { label: 'Harmful', color: 'text-orange-700', bg: 'bg-orange-100' }
+        return { label: 'Dependence', color: 'text-red-800', bg: 'bg-red-200' }
+    }
+
+    const getCageInterpretation = (score) => {
+        if (score === 0) return { label: 'Negative', color: 'text-green-700', bg: 'bg-green-100' }
+        if (score === 1) return { label: 'Possible', color: 'text-yellow-700', bg: 'bg-yellow-100' }
+        return { label: 'Positive', color: 'text-red-700', bg: 'bg-red-100' }
+    }
+
+    const getMdqInterpretation = (score) => {
+        if (score < 7) return { label: 'Negative', color: 'text-green-700', bg: 'bg-green-100' }
+        return { label: 'Positive Screen', color: 'text-red-700', bg: 'bg-red-100' }
+    }
+
+    // Build session history: group notes, recordings, and assessments by date+patient
+    const buildSessionHistory = () => {
+        const sessions = []
+        const usedNoteIds = new Set()
+        const usedRecordingIds = new Set()
+        const usedAssessmentIds = new Set()
+
+        const allAssessments = [
+            ...assessmentResponses.map(r => ({ ...r, _type: 'PHQ9' })),
+            ...gad7Responses.map(r => ({ ...r, _type: 'GAD7' })),
+            ...pcl5Responses.map(r => ({ ...r, _type: 'PCL5' })),
+            ...auditResponses.map(r => ({ ...r, _type: 'AUDIT' })),
+            ...cageResponses.map(r => ({ ...r, _type: 'CAGE' })),
+            ...mdqResponses.map(r => ({ ...r, _type: 'MDQ' })),
+        ]
+
+        // Group 1: Sessions from API (connected flow, session_id linked)
+        apiSessions.forEach(s => {
+            let aiInsights = null
+            const raw = s.note?.ai_insights || s.recording?.summary
+            if (raw) {
+                try { aiInsights = typeof raw === 'string' ? JSON.parse(raw) : raw } catch {}
+            }
+            // Mark items as used so they don't appear again in legacy grouping
+            if (s.note) usedNoteIds.add(s.note.id)
+            if (s.recording) usedRecordingIds.add(s.recording.id)
+            const sessionAssessments = (s.assessments || []).map(a => {
+                usedAssessmentIds.add(a.id)
+                return { ...a, _type: a.assessment_type }
+            })
+
+            sessions.push({
+                id: `session-${s.id}`,
+                date: new Date(s.created_at),
+                patientName: s.patient_name || 'Unknown Patient',
+                patientId: s.patient_id,
+                note: s.note || null,
+                recording: s.recording || null,
+                aiInsights,
+                assessments: sessionAssessments,
+                sessionStatus: s.status,
+            })
+        })
+
+        // Group 2: Legacy notes without session_id (fallback heuristic)
+        savedNotes.forEach(note => {
+            if (usedNoteIds.has(note.id)) return
+            const noteTime = new Date(note.created_at).getTime()
+            const noteDate = new Date(note.created_at).toISOString().split('T')[0]
+
+            const matchingRec = patientRecordingsMap.find(r => {
+                if (usedRecordingIds.has(r.id)) return false
+                if (note.patient_id && String(r.patient_id) !== String(note.patient_id)) return false
+                return Math.abs(new Date(r.created_at).getTime() - noteTime) < 30 * 60 * 1000
+            })
+            if (matchingRec) usedRecordingIds.add(matchingRec.id)
+
+            let aiInsights = null
+            const raw = note.ai_insights || matchingRec?.summary
+            if (raw) {
+                try { aiInsights = typeof raw === 'string' ? JSON.parse(raw) : raw } catch {}
+            }
+
+            const dayAssessments = allAssessments.filter(a => {
+                if (usedAssessmentIds.has(a.id)) return false
+                if (note.patient_id && String(a.patient_id) !== String(note.patient_id)) return false
+                return new Date(a.created_at).toISOString().split('T')[0] === noteDate
+            })
+
+            sessions.push({
+                id: `note-${note.id}`,
+                date: new Date(note.created_at),
+                patientName: note.patient_name || 'Unknown Patient',
+                patientId: note.patient_id,
+                note,
+                recording: matchingRec || null,
+                aiInsights,
+                assessments: dayAssessments,
+            })
+        })
+
+        // Group 3: Orphan recordings (no note, no session_id)
+        patientRecordingsMap.forEach(rec => {
+            if (usedRecordingIds.has(rec.id)) return
+            let aiInsights = null
+            if (rec.summary) {
+                try { aiInsights = typeof rec.summary === 'string' ? JSON.parse(rec.summary) : rec.summary } catch {}
+            }
+            sessions.push({
+                id: `rec-${rec.id}`,
+                date: new Date(rec.created_at),
+                patientName: patients.find(p => String(p.id) === String(rec.patient_id))?.full_name || 'Unknown Patient',
+                patientId: rec.patient_id,
+                note: null,
+                recording: rec,
+                aiInsights,
+                assessments: [],
+            })
+        })
+
+        sessions.sort((a, b) => b.date - a.date)
+        return sessions
+    }
+
+    const CHART_LINES = [
+        { key: 'PHQ9', name: 'PHQ-9', color: '#3b82f6', max: 27, responses: assessmentResponses },
+        { key: 'GAD7', name: 'GAD-7', color: '#8b5cf6', max: 21, responses: gad7Responses },
+        { key: 'PCL5', name: 'PCL-5', color: '#ef4444', max: 80, responses: pcl5Responses },
+        { key: 'AUDIT', name: 'AUDIT', color: '#f97316', max: 40, responses: auditResponses },
+        { key: 'CAGE', name: 'CAGE', color: '#eab308', max: 4, responses: cageResponses },
+        { key: 'MDQ', name: 'MDQ', color: '#14b8a6', max: 13, responses: mdqResponses },
+    ]
+
+    // Build chart data: each row = one attempt index, columns = score per type at that attempt
+    const buildChartData = () => {
+        const visibleKeys = chartFilter === 'all' ? CHART_LINES.map(l => l.key) : [chartFilter]
+        const visibleLines = CHART_LINES.filter(l => visibleKeys.includes(l.key))
+
+        // For each visible type, sort responses oldest-first and number them as attempts
+        const seriesMap = {}
+        let maxAttempts = 0
+        visibleLines.forEach(line => {
+            const sorted = [...line.responses].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+            seriesMap[line.key] = sorted
+            if (sorted.length > maxAttempts) maxAttempts = sorted.length
+        })
+
+        if (maxAttempts === 0) return []
+
+        const data = []
+        for (let i = 0; i < maxAttempts; i++) {
+            const row = { attempt: i + 1 }
+            // For date mode, collect dates from this attempt index
+            const dates = []
+            visibleLines.forEach(line => {
+                const resp = seriesMap[line.key]?.[i]
+                if (resp) {
+                    row[line.key] = resp.total_score
+                    dates.push(new Date(resp.created_at))
+                }
+            })
+            // Use the earliest date among types at this attempt index
+            if (dates.length > 0) {
+                const d = dates.sort((a, b) => a - b)[0]
+                row.dateLabel = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+            }
+            data.push(row)
+        }
+        return data
+    }
+
+    // Build HTML for AI report section
+    const buildReportHtml = (insights) => {
+        if (!insights) return ''
+        let html = '<div class="report"><h2>AI Clinical Report</h2>'
+
+        // Overview
+        if (insights.overview) {
+            const o = insights.overview
+            html += '<h3>Session Overview</h3><table>'
+            if (o.mood) html += `<tr><td><strong>Mood</strong></td><td>${o.mood}</td></tr>`
+            if (o.moodScore) html += `<tr><td><strong>Mood Score</strong></td><td>${o.moodScore}/10</td></tr>`
+            if (o.affect) html += `<tr><td><strong>Affect</strong></td><td>${o.affect}</td></tr>`
+            if (o.engagement) html += `<tr><td><strong>Engagement</strong></td><td>${o.engagement}</td></tr>`
+            if (o.primaryConcerns) html += `<tr><td><strong>Primary Concerns</strong></td><td>${Array.isArray(o.primaryConcerns) ? o.primaryConcerns.join(', ') : o.primaryConcerns}</td></tr>`
+            html += '</table>'
+        }
+
+        // Symptoms
+        if (insights.symptoms?.reported?.length > 0) {
+            html += '<h3>Reported Symptoms</h3><ul>'
+            insights.symptoms.reported.forEach(s => { html += `<li>${s}</li>` })
+            html += '</ul>'
+            if (insights.symptoms.severity) html += `<p><strong>Severity:</strong> ${insights.symptoms.severity}</p>`
+        }
+
+        // Risk Assessment
+        if (insights.riskAssessment) {
+            const r = insights.riskAssessment
+            const color = r.level === 'High' ? '#dc2626' : r.level === 'Moderate' ? '#ca8a04' : '#16a34a'
+            html += `<h3>Risk Assessment</h3><p style="color:${color};font-weight:bold;">Level: ${r.level}</p>`
+            if (r.concerns?.length > 0) {
+                html += '<ul>'
+                r.concerns.forEach(c => { html += `<li>${c}</li>` })
+                html += '</ul>'
+            }
+        }
+
+        // DSM-5 Indications
+        if (insights.clinicalImpression?.possibleDiagnoses?.length > 0) {
+            html += '<h3>DSM-5 Indications</h3><table><tr><th>Code</th><th>Diagnosis</th><th>Confidence</th></tr>'
+            insights.clinicalImpression.possibleDiagnoses.forEach(d => {
+                html += `<tr><td>${d.code || 'N/A'}</td><td>${d.name}</td><td>${d.confidence || 'N/A'}</td></tr>`
+            })
+            html += '</table>'
+        }
+
+        // Key Themes
+        if (insights.clinicalInsights?.themes?.length > 0) {
+            html += '<h3>Key Themes</h3><ul>'
+            insights.clinicalInsights.themes.forEach(t => { html += `<li>${t}</li>` })
+            html += '</ul>'
+        }
+
+        // Treatment Recommendations
+        if (insights.treatmentPlan?.recommendations?.length > 0) {
+            html += '<h3>Treatment Recommendations</h3><ol>'
+            insights.treatmentPlan.recommendations.forEach(r => { html += `<li>${r}</li>` })
+            html += '</ol>'
+            if (insights.treatmentPlan.followUp) html += `<p><strong>Follow-up:</strong> ${insights.treatmentPlan.followUp}</p>`
+        }
+
+        // Next Steps
+        if (insights.nextSteps?.length > 0) {
+            html += '<h3>Next Steps</h3><ul>'
+            insights.nextSteps.forEach(s => { html += `<li>${s}</li>` })
+            html += '</ul>'
+        }
+
+        html += '</div>'
+        return html
+    }
+
     const handleDownloadExport = () => {
-        const content = noteContent || getEditorContent()
+        let content, noteDate, noteStatus, patientName, noteInsights
+
+        if (exportSelectedNoteId === 'current') {
+            // Export current editor content
+            content = noteContent || getEditorContent()
+            noteDate = new Date()
+            noteStatus = editingNoteId ? 'Finalized' : 'Draft'
+            patientName = patients.find(p => String(p.id) === String(selectedPatientId))?.full_name || 'Unknown'
+            noteInsights = aiSummary
+        } else {
+            // Export a specific saved note
+            const allNotes = [...savedNotes, ...patientSessions]
+            const note = allNotes.find(n => String(n.id) === String(exportSelectedNoteId))
+            if (!note) {
+                alert('Selected note not found.')
+                return
+            }
+            content = note.content
+            noteDate = new Date(note.created_at)
+            noteStatus = note.status || 'Finalized'
+            patientName = note.patient_name || patients.find(p => String(p.id) === String(note.patient_id))?.full_name || 'Unknown'
+            // Parse AI insights from the note
+            if (note.ai_insights) {
+                try {
+                    noteInsights = typeof note.ai_insights === 'string' ? JSON.parse(note.ai_insights) : note.ai_insights
+                } catch { noteInsights = null }
+            }
+        }
+
         const textContent = content?.replace(/<[^>]*>/g, '') || ''
         if (!textContent.trim()) {
-            alert('No content to export. Please write some notes first.')
+            alert('The selected note has no content to export.')
             return
         }
 
-        const patientName = patients.find(p => String(p.id) === String(selectedPatientId))?.full_name || 'Unknown'
-        const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+        const dateStr = noteDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+        const timeStr = noteDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+
+        const reportHtml = (exportIncludeReport && noteInsights) ? buildReportHtml(noteInsights) : ''
 
         if (exportFormat === 'PDF') {
             const printWindow = window.open('', '_blank')
@@ -792,11 +1313,19 @@ const SessionNotes = () => {
                     <style>
                         body { font-family: 'Segoe UI', Arial, sans-serif; padding: 40px; color: #1e293b; line-height: 1.7; }
                         h1 { font-size: 22px; margin-bottom: 4px; }
+                        h2 { font-size: 18px; margin-top: 32px; padding-bottom: 8px; border-bottom: 2px solid #4f46e5; color: #4f46e5; }
+                        h3 { font-size: 14px; margin-top: 18px; color: #334155; text-transform: uppercase; letter-spacing: 0.5px; }
                         .meta { color: #64748b; font-size: 13px; margin-bottom: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 16px; }
                         .content { font-size: 15px; }
                         .content h1, .content h2, .content h3 { margin-top: 20px; }
                         .content ul, .content ol { padding-left: 20px; }
                         .content img { max-width: 100%; }
+                        .report { margin-top: 32px; padding-top: 24px; border-top: 3px solid #e2e8f0; }
+                        .report table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+                        .report th, .report td { text-align: left; padding: 8px 12px; border: 1px solid #e2e8f0; font-size: 13px; }
+                        .report th { background: #f1f5f9; font-weight: 600; color: #334155; }
+                        .report ul, .report ol { padding-left: 20px; margin: 8px 0; }
+                        .report li { margin-bottom: 4px; font-size: 13px; }
                         @media print { body { padding: 20px; } }
                     </style>
                 </head>
@@ -804,10 +1333,11 @@ const SessionNotes = () => {
                     <h1>Session Notes</h1>
                     <div class="meta">
                         <strong>Patient:</strong> ${patientName} &nbsp;&bull;&nbsp;
-                        <strong>Date:</strong> ${dateStr} &nbsp;&bull;&nbsp;
-                        <strong>Status:</strong> Finalized
+                        <strong>Date:</strong> ${dateStr} at ${timeStr} &nbsp;&bull;&nbsp;
+                        <strong>Status:</strong> ${noteStatus}
                     </div>
                     <div class="content">${content}</div>
+                    ${reportHtml}
                 </body>
                 </html>
             `)
@@ -816,12 +1346,19 @@ const SessionNotes = () => {
         } else if (exportFormat === 'Word') {
             const html = `
                 <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-                <head><meta charset="utf-8"><title>Session Notes</title></head>
+                <head><meta charset="utf-8"><title>Session Notes</title>
+                <style>
+                    table { width: 100%; border-collapse: collapse; }
+                    th, td { text-align: left; padding: 6px 10px; border: 1px solid #ccc; }
+                    th { background: #f0f0f0; }
+                </style>
+                </head>
                 <body>
                     <h1>Session Notes</h1>
-                    <p><strong>Patient:</strong> ${patientName} | <strong>Date:</strong> ${dateStr}</p>
+                    <p><strong>Patient:</strong> ${patientName} | <strong>Date:</strong> ${dateStr} at ${timeStr} | <strong>Status:</strong> ${noteStatus}</p>
                     <hr>
                     ${content}
+                    ${reportHtml}
                 </body>
                 </html>
             `
@@ -994,7 +1531,43 @@ const SessionNotes = () => {
                                     )) : <option disabled>Loading...</option>}
                                 </select>
                             </div>
-                            <button onClick={() => navigate('/appointments')} className="px-4 py-2 bg-white border-2 border-slate-300 text-slate-700 rounded-lg font-semibold hover:bg-slate-50 transition-colors flex items-center space-x-2">
+                            {selectedPatientId && patientSessions.length > 0 && (
+                                <div className="flex items-center space-x-2">
+                                    <label className="text-sm font-medium text-slate-600">Session:</label>
+                                    <select
+                                        value={selectedSessionId}
+                                        onChange={(e) => setSelectedSessionId(e.target.value)}
+                                        className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 min-w-[200px]"
+                                    >
+                                        <option value="">Load past session...</option>
+                                        {patientSessions.map(note => {
+                                            const d = new Date(note.created_at)
+                                            const label = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                                                + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+                                            return (
+                                                <option key={note.id} value={String(note.id)}>
+                                                    {label} — {note.status}
+                                                </option>
+                                            )
+                                        })}
+                                    </select>
+                                </div>
+                            )}
+                            {editingNoteId && (
+                                <span className="px-2.5 py-1 bg-amber-50 text-amber-700 text-xs font-bold rounded-lg border border-amber-200">
+                                    Editing Note #{editingNoteId}
+                                </span>
+                            )}
+                            <button
+                                onClick={handleNewNote}
+                                className="px-4 py-2 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors flex items-center space-x-2 text-sm"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                                </svg>
+                                <span>New Note</span>
+                            </button>
+                            <button onClick={() => navigate('/appointments')} className="px-4 py-2 bg-white border-2 border-slate-300 text-slate-700 rounded-lg font-semibold hover:bg-slate-50 transition-colors flex items-center space-x-2 text-sm">
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                 </svg>
@@ -1097,7 +1670,7 @@ const SessionNotes = () => {
                                                     {isSaving ? (
                                                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                                                     ) : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>}
-                                                    <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                                                    <span>{isSaving ? 'Saving...' : editingNoteId ? 'Update' : 'Save'}</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -1311,7 +1884,7 @@ const SessionNotes = () => {
                                                             </div>
                                                         </div>
                                                     )}
-                                                    <button
+                                                    {/* <button
                                                         onClick={() => {
                                                             if (editorRef.current) {
                                                                 editorRef.current.innerHTML += `<hr><p><b>Symptom Report</b></p><p><b>Impression:</b> ${symptomReport.overall_impression}</p><p><b>Symptoms Found:</b> ${symptomReport.symptoms.map(s => `${s.symptom} (${s.severity})`).join(', ')}</p>`
@@ -1322,7 +1895,7 @@ const SessionNotes = () => {
                                                     >
                                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                                         <span>Append Report to Notes</span>
-                                                    </button>
+                                                    </button> */}
                                                 </div>
                                             )}
 
@@ -1450,55 +2023,201 @@ const SessionNotes = () => {
                             {activeTab === 'assessments' && (
                                 <div className="p-6">
                                     <div className="space-y-6">
-                                        {/* Assessment Overview */}
+                                        {/* PHQ-9 Latest Score Card */}
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-5">
                                                 <div className="flex items-center justify-between mb-3">
                                                     <span className="text-2xl">📊</span>
-                                                    <span className="text-xs font-semibold px-2 py-1 bg-blue-200 text-blue-700 rounded-full">Latest</span>
+                                                    <span className="text-xs font-semibold px-2 py-1 bg-blue-200 text-blue-700 rounded-full">
+                                                        {assessmentResponses.length > 0 ? 'Latest' : 'N/A'}
+                                                    </span>
                                                 </div>
                                                 <h4 className="font-bold text-slate-800 mb-1">PHQ-9 Score</h4>
                                                 <div className="flex items-baseline space-x-2">
-                                                    <span className="text-3xl font-bold text-blue-600">8</span>
+                                                    <span className="text-3xl font-bold text-blue-600">
+                                                        {assessmentResponses.length > 0 ? assessmentResponses[0].total_score : '--'}
+                                                    </span>
                                                     <span className="text-sm text-slate-600">/ 27</span>
                                                 </div>
-                                                <p className="text-sm text-slate-600 mt-2">No data recorded</p>
-                                                <div className="mt-3 w-full bg-blue-200 rounded-full h-2">
-                                                    <div className="bg-blue-500 h-2 rounded-full" style={{ width: '0%' }}></div>
-                                                </div>
+                                                {assessmentResponses.length > 0 ? (
+                                                    <>
+                                                        <p className={`text-sm font-semibold mt-2 ${getPhq9Interpretation(assessmentResponses[0].total_score).color}`}>
+                                                            {getPhq9Interpretation(assessmentResponses[0].total_score).label}
+                                                        </p>
+                                                        <div className="mt-3 w-full bg-blue-200 rounded-full h-2">
+                                                            <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${(assessmentResponses[0].total_score / 27) * 100}%` }}></div>
+                                                        </div>
+                                                        <p className="text-xs text-slate-400 mt-2">
+                                                            {new Date(assessmentResponses[0].created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}
+                                                        </p>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <p className="text-sm text-slate-500 mt-2">No data recorded</p>
+                                                        <div className="mt-3 w-full bg-blue-200 rounded-full h-2">
+                                                            <div className="bg-blue-500 h-2 rounded-full" style={{ width: '0%' }}></div>
+                                                        </div>
+                                                    </>
+                                                )}
                                             </div>
 
                                             <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-xl p-5">
                                                 <div className="flex items-center justify-between mb-3">
                                                     <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                                                    <span className="text-xs font-semibold px-2 py-1 bg-purple-200 text-purple-700 rounded-full">N/A</span>
+                                                    <span className="text-xs font-semibold px-2 py-1 bg-purple-200 text-purple-700 rounded-full">
+                                                        {gad7Responses.length > 0 ? 'Latest' : 'N/A'}
+                                                    </span>
                                                 </div>
                                                 <h4 className="font-bold text-slate-800 mb-1">GAD-7 Score</h4>
                                                 <div className="flex items-baseline space-x-2">
-                                                    <span className="text-3xl font-bold text-purple-600">--</span>
+                                                    <span className="text-3xl font-bold text-purple-600">
+                                                        {gad7Responses.length > 0 ? gad7Responses[0].total_score : '--'}
+                                                    </span>
                                                     <span className="text-sm text-slate-600">/ 21</span>
                                                 </div>
-                                                <p className="text-sm text-slate-600 mt-2">No data recorded</p>
-                                                <div className="mt-3 w-full bg-purple-200 rounded-full h-2">
-                                                    <div className="bg-purple-500 h-2 rounded-full" style={{ width: '0%' }}></div>
-                                                </div>
+                                                {gad7Responses.length > 0 ? (
+                                                    <>
+                                                        <p className={`text-sm font-semibold mt-2 ${getGad7Interpretation(gad7Responses[0].total_score).color}`}>
+                                                            {getGad7Interpretation(gad7Responses[0].total_score).label}
+                                                        </p>
+                                                        <div className="mt-3 w-full bg-purple-200 rounded-full h-2">
+                                                            <div className="bg-purple-500 h-2 rounded-full transition-all" style={{ width: `${(gad7Responses[0].total_score / 21) * 100}%` }}></div>
+                                                        </div>
+                                                        <p className="text-xs text-slate-400 mt-2">
+                                                            {new Date(gad7Responses[0].created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}
+                                                        </p>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <p className="text-sm text-slate-500 mt-2">No data recorded</p>
+                                                        <div className="mt-3 w-full bg-purple-200 rounded-full h-2">
+                                                            <div className="bg-purple-500 h-2 rounded-full" style={{ width: '0%' }}></div>
+                                                        </div>
+                                                    </>
+                                                )}
                                             </div>
 
-                                            <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-xl p-5">
+                                            <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-xl p-5">
                                                 <div className="flex items-center justify-between mb-3">
-                                                    <span className="text-2xl">💪</span>
-                                                    <span className="text-xs font-semibold px-2 py-1 bg-green-200 text-green-700 rounded-full">N/A</span>
+                                                    <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                                    <span className="text-xs font-semibold px-2 py-1 bg-red-200 text-red-700 rounded-full">
+                                                        {pcl5Responses.length > 0 ? 'Latest' : 'N/A'}
+                                                    </span>
                                                 </div>
-                                                <h4 className="font-bold text-slate-800 mb-1">WHODAS 2.0</h4>
+                                                <h4 className="font-bold text-slate-800 mb-1">PCL-5 Score</h4>
                                                 <div className="flex items-baseline space-x-2">
-                                                    <span className="text-3xl font-bold text-green-600">--</span>
-                                                    <span className="text-sm text-slate-600">/ 100</span>
+                                                    <span className="text-3xl font-bold text-red-600">
+                                                        {pcl5Responses.length > 0 ? pcl5Responses[0].total_score : '--'}
+                                                    </span>
+                                                    <span className="text-sm text-slate-600">/ 80</span>
                                                 </div>
-                                                <p className="text-sm text-slate-600 mt-2">No data recorded</p>
-                                                <div className="mt-3 w-full bg-green-200 rounded-full h-2">
-                                                    <div className="bg-green-500 h-2 rounded-full" style={{ width: '0%' }}></div>
+                                                {pcl5Responses.length > 0 ? (
+                                                    <>
+                                                        <p className={`text-sm font-semibold mt-2 ${getPcl5Interpretation(pcl5Responses[0].total_score).color}`}>
+                                                            {getPcl5Interpretation(pcl5Responses[0].total_score).label}
+                                                        </p>
+                                                        <div className="mt-3 w-full bg-red-200 rounded-full h-2">
+                                                            <div className="bg-red-500 h-2 rounded-full transition-all" style={{ width: `${(pcl5Responses[0].total_score / 80) * 100}%` }}></div>
+                                                        </div>
+                                                        <p className="text-xs text-slate-400 mt-2">
+                                                            {new Date(pcl5Responses[0].created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}
+                                                        </p>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <p className="text-sm text-slate-500 mt-2">No data recorded</p>
+                                                        <div className="mt-3 w-full bg-red-200 rounded-full h-2">
+                                                            <div className="bg-red-500 h-2 rounded-full" style={{ width: '0%' }}></div>
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Score Trends Chart */}
+                                        <div className="bg-white border border-slate-200 rounded-xl p-6">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <h3 className="text-lg font-bold text-slate-800 flex items-center space-x-2">
+                                                    <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                                    </svg>
+                                                    <span>Score Trends</span>
+                                                </h3>
+                                                {/* X-Axis toggle */}
+                                                <div className="flex items-center space-x-1 bg-slate-100 rounded-lg p-0.5">
+                                                    <button onClick={() => setChartXAxis('attempt')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartXAxis === 'attempt' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Attempts</button>
+                                                    <button onClick={() => setChartXAxis('date')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${chartXAxis === 'date' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Date</button>
                                                 </div>
                                             </div>
+                                            {/* Assessment type filter */}
+                                            <div className="flex items-center space-x-1 bg-slate-100 rounded-lg p-1 mb-4 overflow-x-auto">
+                                                {[
+                                                    { key: 'all', label: 'All' },
+                                                    { key: 'PHQ9', label: 'PHQ-9' },
+                                                    { key: 'GAD7', label: 'GAD-7' },
+                                                    { key: 'PCL5', label: 'PCL-5' },
+                                                    { key: 'AUDIT', label: 'AUDIT' },
+                                                    { key: 'CAGE', label: 'CAGE' },
+                                                    { key: 'MDQ', label: 'MDQ' },
+                                                ].map(f => (
+                                                    <button
+                                                        key={f.key}
+                                                        onClick={() => setChartFilter(f.key)}
+                                                        className={`px-2.5 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${chartFilter === f.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                                    >
+                                                        {f.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {(() => {
+                                                const chartData = buildChartData()
+                                                if (chartData.length === 0) return (
+                                                    <div className="py-12 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                                        No assessment data to chart. Take some assessments first.
+                                                    </div>
+                                                )
+                                                const visibleKeys = chartFilter === 'all' ? CHART_LINES.map(l => l.key) : [chartFilter]
+                                                const visibleLines = CHART_LINES.filter(l => visibleKeys.includes(l.key))
+                                                // Determine Y axis max: if single type use its max, if all use the highest max among types that have data
+                                                const yMax = chartFilter !== 'all'
+                                                    ? (CHART_LINES.find(l => l.key === chartFilter)?.max || 27)
+                                                    : Math.max(...visibleLines.filter(l => l.responses.length > 0).map(l => l.max), 27)
+                                                return (
+                                                    <ResponsiveContainer width="100%" height={280}>
+                                                        <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                                            <XAxis
+                                                                dataKey={chartXAxis === 'date' ? 'dateLabel' : 'attempt'}
+                                                                tick={{ fontSize: 12, fill: '#64748b' }}
+                                                                label={chartXAxis === 'attempt' ? { value: 'Attempt', position: 'insideBottom', offset: -2, fontSize: 11, fill: '#94a3b8' } : undefined}
+                                                            />
+                                                            <YAxis domain={[0, yMax]} tick={{ fontSize: 12, fill: '#64748b' }} />
+                                                            <Tooltip
+                                                                contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
+                                                                labelFormatter={(label) => chartXAxis === 'attempt' ? `Attempt ${label}` : label}
+                                                                formatter={(value, name) => {
+                                                                    const line = CHART_LINES.find(l => l.name === name)
+                                                                    return [`${value} / ${line ? line.max : '?'}`, name]
+                                                                }}
+                                                            />
+                                                            <Legend />
+                                                            {visibleLines.map(line => (
+                                                                <Line
+                                                                    key={line.key}
+                                                                    type="monotone"
+                                                                    dataKey={line.key}
+                                                                    name={line.name}
+                                                                    stroke={line.color}
+                                                                    strokeWidth={2.5}
+                                                                    dot={{ r: 5, fill: line.color }}
+                                                                    activeDot={{ r: 7 }}
+                                                                    connectNulls
+                                                                />
+                                                            ))}
+                                                        </LineChart>
+                                                    </ResponsiveContainer>
+                                                )
+                                            })()}
                                         </div>
 
                                         {/* Available Assessments */}
@@ -1509,14 +2228,14 @@ const SessionNotes = () => {
                                             </h3>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 {[
-                                                    { name: 'PHQ-9', description: 'Patient Health Questionnaire - Depression', time: '3 min', color: 'blue' },
-                                                    { name: 'GAD-7', description: 'Generalized Anxiety Disorder Scale', time: '2 min', color: 'purple' },
-                                                    { name: 'PCL-5', description: 'PTSD Checklist for DSM-5', time: '5 min', color: 'red' },
-                                                    { name: 'AUDIT', description: 'Alcohol Use Disorders Identification', time: '3 min', color: 'orange' },
-                                                    { name: 'CAGE', description: 'Substance Abuse Screening', time: '1 min', color: 'yellow' },
-                                                    { name: 'MDQ', description: 'Mood Disorder Questionnaire', time: '3 min', color: 'teal' }
+                                                    { name: 'PHQ-9', key: 'PHQ9', description: 'Patient Health Questionnaire - Depression', time: '3 min', color: 'blue', active: true },
+                                                    { name: 'GAD-7', key: 'GAD7', description: 'Generalized Anxiety Disorder Scale', time: '2 min', color: 'purple', active: true },
+                                                    { name: 'PCL-5', key: 'PCL5', description: 'PTSD Checklist for DSM-5', time: '5 min', color: 'red', active: true },
+                                                    { name: 'AUDIT', key: 'AUDIT', description: 'Alcohol Use Disorders Identification', time: '3 min', color: 'orange', active: true },
+                                                    { name: 'CAGE', key: 'CAGE', description: 'Substance Abuse Screening', time: '1 min', color: 'yellow', active: true },
+                                                    { name: 'MDQ', key: 'MDQ', description: 'Mood Disorder Questionnaire', time: '3 min', color: 'teal', active: true }
                                                 ].map((assessment, index) => (
-                                                    <div key={index} className="flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 rounded-lg border-2 border-transparent hover:border-slate-200 transition-all cursor-pointer group">
+                                                    <div key={index} className={`flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 rounded-lg border-2 border-transparent hover:border-slate-200 transition-all group ${assessment.active ? 'cursor-pointer' : 'opacity-60'}`}>
                                                         <div className="flex items-center space-x-4">
                                                             <div className={`w-12 h-12 bg-${assessment.color}-100 rounded-xl flex items-center justify-center`}>
                                                                 <span className={`text-lg font-bold text-${assessment.color}-600`}>{assessment.name.charAt(0)}</span>
@@ -1528,108 +2247,411 @@ const SessionNotes = () => {
                                                         </div>
                                                         <div className="flex items-center space-x-3">
                                                             <span className="text-xs font-medium text-slate-400">{assessment.time}</span>
-                                                            <button className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                Start
-                                                            </button>
+                                                            {assessment.active ? (
+                                                                <div className="relative">
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); setAssessmentMenuOpen(assessmentMenuOpen === assessment.key ? null : assessment.key) }}
+                                                                        disabled={assessmentLinkLoading}
+                                                                        className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50 flex items-center space-x-1.5"
+                                                                    >
+                                                                        <span>Start</span>
+                                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                                                                    </button>
+                                                                    {assessmentMenuOpen === assessment.key && (
+                                                                        <>
+                                                                            <div className="fixed inset-0 z-10" onClick={() => setAssessmentMenuOpen(null)} />
+                                                                            <div className="absolute right-0 top-full mt-1 z-20 w-52 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5">
+                                                                                <button
+                                                                                    onClick={() => handleGenerateAssessmentLink(assessment.key, true)}
+                                                                                    className="w-full px-4 py-2.5 text-left text-sm flex items-center space-x-3 hover:bg-slate-50"
+                                                                                >
+                                                                                    <svg className="w-4 h-4 text-primary-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                                    </svg>
+                                                                                    <div>
+                                                                                        <p className="font-semibold text-slate-800">Take Test Now</p>
+                                                                                        <p className="text-xs text-slate-400">Open in new tab</p>
+                                                                                    </div>
+                                                                                </button>
+                                                                                <button
+                                                                                    onClick={() => handleGenerateAssessmentLink(assessment.key, false)}
+                                                                                    className="w-full px-4 py-2.5 text-left text-sm flex items-center space-x-3 hover:bg-slate-50"
+                                                                                >
+                                                                                    <svg className="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                                                                    </svg>
+                                                                                    <div>
+                                                                                        <p className="font-semibold text-slate-800">Copy Link</p>
+                                                                                        <p className="text-xs text-slate-400">Send to patient</p>
+                                                                                    </div>
+                                                                                </button>
+                                                                            </div>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-xs text-slate-400 font-medium">Soon</span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 ))}
                                             </div>
                                         </div>
 
-                                        {/* Score Trends - commented out
+                                        {/* Generated Assessment Link */}
+                                        {assessmentLink && (
+                                            <div className="bg-green-50 border border-green-200 rounded-xl p-6">
+                                                <h4 className="font-bold text-green-800 mb-2 flex items-center space-x-2">
+                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                                    </svg>
+                                                    <span>Assessment Link Generated</span>
+                                                </h4>
+                                                <p className="text-sm text-green-700 mb-3">Send this link to the patient. It expires in 7 days and requires no login.</p>
+                                                <div className="flex items-center space-x-2">
+                                                    <input
+                                                        type="text"
+                                                        readOnly
+                                                        value={assessmentLink}
+                                                        className="flex-1 px-4 py-2.5 bg-white border border-green-300 rounded-lg text-sm text-slate-700 font-mono"
+                                                    />
+                                                    <button
+                                                        onClick={handleCopyLink}
+                                                        className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center space-x-1.5 ${linkCopied ? 'bg-green-600 text-white' : 'bg-white border border-green-300 text-green-700 hover:bg-green-100'}`}
+                                                    >
+                                                        {linkCopied ? (
+                                                            <>
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+                                                                <span>Copied</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                                                <span>Copy</span>
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Past PHQ-9 Responses */}
                                         <div className="bg-white border border-slate-200 rounded-xl p-6">
                                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
                                                 <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                                                 </svg>
-                                                <span>Score Trends</span>
+                                                <span>PHQ-9 History</span>
+                                                <span className="text-sm font-normal text-slate-400">({assessmentResponses.length} record{assessmentResponses.length !== 1 ? 's' : ''})</span>
                                             </h3>
-                                            <div className="space-y-4">
-                                                {[].map((record, index) => (
-                                                    <div key={index} className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
-                                                        <div className="flex items-center space-x-4">
-                                                            <div className={`w-10 h-10 bg-${record.color}-100 rounded-lg flex items-center justify-center`}>
-                                                                <span className={`font-bold text-${record.color}-600`}>{record.assessment.charAt(0)}</span>
-                                                            </div>
-                                                            <div>
-                                                                <h4 className="font-semibold text-slate-800">{record.assessment}</h4>
-                                                                <p className="text-sm text-slate-500">{record.date}</p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center space-x-6">
-                                                            <div className="text-right">
-                                                                <div className="flex items-center space-x-2">
-                                                                    <span className="text-lg font-bold text-slate-800">{record.score}</span>
-                                                                    <span className={`text-sm ${record.score < record.prevScore ? 'text-green-600' : 'text-red-600'}`}>
-                                                                        {record.score < record.prevScore ? '↓' : '↑'} {Math.abs(record.score - record.prevScore)}
-                                                                    </span>
+                                            {assessmentResponsesLoading ? (
+                                                <div className="space-y-3 animate-pulse">
+                                                    {[1, 2].map(i => <div key={i} className="h-16 bg-slate-100 rounded-lg"></div>)}
+                                                </div>
+                                            ) : assessmentResponses.length === 0 ? (
+                                                <div className="py-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                                    {selectedPatientId ? 'No PHQ-9 assessments taken yet for this patient.' : 'Select a patient to view assessment history.'}
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-3">
+                                                    {assessmentResponses.map((resp, idx) => {
+                                                        const interp = getPhq9Interpretation(resp.total_score)
+                                                        const d = new Date(resp.created_at)
+                                                        const dateStr = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                                                        const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+                                                        const prevScore = idx < assessmentResponses.length - 1 ? assessmentResponses[idx + 1].total_score : null
+                                                        return (
+                                                            <div key={resp.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
+                                                                <div className="flex items-center space-x-4">
+                                                                    <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                                                                        <span className="font-bold text-blue-600">P</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <h4 className="font-semibold text-slate-800">PHQ-9</h4>
+                                                                        <p className="text-sm text-slate-500">{dateStr} at {timeStr}</p>
+                                                                    </div>
                                                                 </div>
-                                                                <span className={`text-xs font-medium px-2 py-0.5 rounded-full bg-${record.color}-100 text-${record.color}-700`}>
-                                                                    {record.severity}
-                                                                </span>
+                                                                <div className="flex items-center space-x-4">
+                                                                    <div className="text-right">
+                                                                        <div className="flex items-center space-x-2">
+                                                                            <span className="text-lg font-bold text-slate-800">{resp.total_score}/27</span>
+                                                                            {prevScore !== null && (
+                                                                                <span className={`text-sm font-bold ${resp.total_score < prevScore ? 'text-green-600' : resp.total_score > prevScore ? 'text-red-600' : 'text-slate-400'}`}>
+                                                                                    {resp.total_score < prevScore ? '↓' : resp.total_score > prevScore ? '↑' : '='}{resp.total_score !== prevScore ? ` ${Math.abs(resp.total_score - prevScore)}` : ''}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${interp.bg} ${interp.color}`}>
+                                                                            {interp.label}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
                                                             </div>
-                                                            <button className="text-primary-600 hover:text-primary-700">
-                                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                                                                </svg>
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
                                         </div>
-                                        */}
+
+                                        {/* GAD-7 History */}
+                                        <div className="bg-white border border-slate-200 rounded-xl p-6">
+                                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
+                                                <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                                </svg>
+                                                <span>GAD-7 History</span>
+                                                <span className="text-sm font-normal text-slate-400">({gad7Responses.length} record{gad7Responses.length !== 1 ? 's' : ''})</span>
+                                            </h3>
+                                            {assessmentResponsesLoading ? (
+                                                <div className="space-y-3 animate-pulse">
+                                                    {[1, 2].map(i => <div key={i} className="h-16 bg-slate-100 rounded-lg"></div>)}
+                                                </div>
+                                            ) : gad7Responses.length === 0 ? (
+                                                <div className="py-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                                    {selectedPatientId ? 'No GAD-7 assessments taken yet for this patient.' : 'Select a patient to view assessment history.'}
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-3">
+                                                    {gad7Responses.map((resp, idx) => {
+                                                        const interp = getGad7Interpretation(resp.total_score)
+                                                        const d = new Date(resp.created_at)
+                                                        const dateStr = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                                                        const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+                                                        const prevScore = idx < gad7Responses.length - 1 ? gad7Responses[idx + 1].total_score : null
+                                                        return (
+                                                            <div key={resp.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
+                                                                <div className="flex items-center space-x-4">
+                                                                    <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                                                                        <span className="font-bold text-purple-600">G</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <h4 className="font-semibold text-slate-800">GAD-7</h4>
+                                                                        <p className="text-sm text-slate-500">{dateStr} at {timeStr}</p>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center space-x-4">
+                                                                    <div className="text-right">
+                                                                        <div className="flex items-center space-x-2">
+                                                                            <span className="text-lg font-bold text-slate-800">{resp.total_score}/21</span>
+                                                                            {prevScore !== null && (
+                                                                                <span className={`text-sm font-bold ${resp.total_score < prevScore ? 'text-green-600' : resp.total_score > prevScore ? 'text-red-600' : 'text-slate-400'}`}>
+                                                                                    {resp.total_score < prevScore ? '↓' : resp.total_score > prevScore ? '↑' : '='}{resp.total_score !== prevScore ? ` ${Math.abs(resp.total_score - prevScore)}` : ''}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${interp.bg} ${interp.color}`}>
+                                                                            {interp.label}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             )}
 
-                            {activeTab === 'history' && (
+                            {activeTab === 'history' && (() => {
+                                const sessionHistory = buildSessionHistory()
+                                return (
                                 <div className="p-6">
                                     <div className="space-y-6">
                                         <div className="flex items-center justify-between">
-                                            <h3 className="text-lg font-bold text-slate-800">Saved Notes</h3>
-                                            <span className="text-sm text-slate-500">{savedNotes.length} note{savedNotes.length !== 1 ? 's' : ''}</span>
+                                            <h3 className="text-lg font-bold text-slate-800">Session History</h3>
+                                            <span className="text-sm text-slate-500">{sessionHistory.length} session{sessionHistory.length !== 1 ? 's' : ''}</span>
                                         </div>
 
                                         {notesLoading ? (
                                             <div className="space-y-4 animate-pulse">
                                                 {[1, 2, 3].map(i => <div key={i} className="h-24 bg-slate-100 rounded-xl"></div>)}
                                             </div>
-                                        ) : savedNotes.length === 0 ? (
+                                        ) : sessionHistory.length === 0 ? (
                                             <div className="py-12 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
                                                 <svg className="w-12 h-12 text-slate-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                                 </svg>
-                                                <p className="text-slate-500 font-medium">No saved notes yet</p>
-                                                <p className="text-sm text-slate-400 mt-1">Notes you save will appear here</p>
+                                                <p className="text-slate-500 font-medium">No sessions yet</p>
+                                                <p className="text-sm text-slate-400 mt-1">Session notes, recordings, and assessments will appear here</p>
                                             </div>
                                         ) : (
                                             <div className="space-y-4">
-                                                {savedNotes.map(note => {
-                                                    const noteDate = new Date(note.created_at)
-                                                    const dateStr = noteDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
-                                                    const timeStr = noteDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
-                                                    const plainText = note.content?.replace(/<[^>]*>/g, '') || ''
-                                                    const preview = plainText.length > 150 ? plainText.substring(0, 150) + '...' : plainText
+                                                {sessionHistory.map(session => {
+                                                    const dateStr = session.date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                                                    const timeStr = session.date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+                                                    const isExpanded = expandedSessionId === session.id
+                                                    const hasNote = !!session.note
+                                                    const hasRecording = !!session.recording
+                                                    const hasTranscript = !!(session.recording?.transcript)
+                                                    const hasReport = !!session.aiInsights
+                                                    const hasAssessments = session.assessments.length > 0
+
                                                     return (
-                                                        <div
-                                                            key={note.id}
-                                                            className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md transition-shadow cursor-pointer"
-                                                            onClick={() => setViewingNote(note)}
-                                                        >
-                                                            <div className="flex items-start justify-between mb-2">
-                                                                <div className="flex items-center space-x-3">
-                                                                    <span className="text-sm font-bold text-slate-800">{note.patient_name || 'Unknown Patient'}</span>
-                                                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${note.status === 'Finalized' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                                                                        {note.status}
-                                                                    </span>
+                                                        <div key={session.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
+                                                            {/* Session header */}
+                                                            <div
+                                                                className="p-5 cursor-pointer"
+                                                                onClick={() => { setExpandedSessionId(isExpanded ? null : session.id); setExpandedSessionSection(null) }}
+                                                            >
+                                                                <div className="flex items-start justify-between mb-3">
+                                                                    <div className="flex items-center space-x-3">
+                                                                        <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0">
+                                                                            <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                                        </div>
+                                                                        <div>
+                                                                            <span className="text-sm font-bold text-slate-800">{session.patientName}</span>
+                                                                            <p className="text-xs text-slate-500">{dateStr} at {timeStr}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <svg className={`w-5 h-5 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
                                                                 </div>
-                                                                <div className="text-xs text-slate-400">
-                                                                    {dateStr} at {timeStr}
+                                                                {/* Badges */}
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    {hasNote && <span className="inline-flex items-center space-x-1 px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-full border border-blue-200"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg><span>Notes</span></span>}
+                                                                    {hasRecording && <span className="inline-flex items-center space-x-1 px-2 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-bold rounded-full border border-purple-200"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg><span>Recording</span></span>}
+                                                                    {hasTranscript && <span className="inline-flex items-center space-x-1 px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-full border border-indigo-200"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg><span>Transcript</span></span>}
+                                                                    {hasReport && <span className="inline-flex items-center space-x-1 px-2 py-0.5 bg-green-50 text-green-700 text-[10px] font-bold rounded-full border border-green-200"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg><span>Report</span></span>}
+                                                                    {hasAssessments && <span className="inline-flex items-center space-x-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-bold rounded-full border border-amber-200"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg><span>{session.assessments.length} Score{session.assessments.length > 1 ? 's' : ''}</span></span>}
                                                                 </div>
                                                             </div>
-                                                            <p className="text-sm text-slate-600 leading-relaxed">{preview}</p>
+
+                                                            {/* Expanded content */}
+                                                            {isExpanded && (
+                                                                <div className="border-t border-slate-200">
+                                                                    {/* Section tabs */}
+                                                                    <div className="flex border-b border-slate-100 px-5 pt-3 space-x-1 overflow-x-auto">
+                                                                        {[
+                                                                            hasNote && { key: 'notes', label: 'Notes' },
+                                                                            hasRecording && { key: 'audio', label: 'Recording' },
+                                                                            hasTranscript && { key: 'transcript', label: 'Transcript' },
+                                                                            hasReport && { key: 'report', label: 'AI Report' },
+                                                                            hasAssessments && { key: 'scores', label: 'Scores' },
+                                                                        ].filter(Boolean).map(tab => (
+                                                                            <button
+                                                                                key={tab.key}
+                                                                                onClick={(e) => { e.stopPropagation(); setExpandedSessionSection(expandedSessionSection === tab.key ? null : tab.key) }}
+                                                                                className={`px-4 py-2.5 text-xs font-bold rounded-t-lg transition-colors whitespace-nowrap ${expandedSessionSection === tab.key ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}
+                                                                            >
+                                                                                {tab.label}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+
+                                                                    {/* Section content */}
+                                                                    <div className="p-5">
+                                                                        {/* Notes */}
+                                                                        {expandedSessionSection === 'notes' && session.note && (
+                                                                            <div>
+                                                                                <div className="flex items-center justify-between mb-3">
+                                                                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${session.note.status === 'Finalized' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{session.note.status}</span>
+                                                                                    <button
+                                                                                        onClick={(e) => { e.stopPropagation(); setViewingNote(session.note) }}
+                                                                                        className="text-xs font-bold text-primary-600 hover:text-primary-700"
+                                                                                    >View Full / Edit</button>
+                                                                                </div>
+                                                                                <div className="prose prose-sm prose-slate max-w-none max-h-64 overflow-y-auto bg-slate-50 rounded-lg p-4 border border-slate-100" dangerouslySetInnerHTML={{ __html: session.note.content }} />
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* Audio Recording */}
+                                                                        {expandedSessionSection === 'audio' && session.recording && (
+                                                                            <div>
+                                                                                <div className="flex items-center space-x-4 mb-3">
+                                                                                    <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
+                                                                                        <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                                                                                    </div>
+                                                                                    <div className="text-sm text-slate-500">
+                                                                                        {session.recording.duration && <span>{Math.floor(session.recording.duration / 60)}m {session.recording.duration % 60}s</span>}
+                                                                                        {session.recording.file_size && <span> &bull; {session.recording.file_size < 1024 * 1024 ? (session.recording.file_size / 1024).toFixed(1) + ' KB' : (session.recording.file_size / (1024 * 1024)).toFixed(1) + ' MB'}</span>}
+                                                                                        {session.recording.format && <span> &bull; <span className="uppercase text-xs font-semibold">{session.recording.format}</span></span>}
+                                                                                    </div>
+                                                                                </div>
+                                                                                {session.recording.audio_url ? (
+                                                                                    <audio controls className="w-full" src={getAudioUrl(session.recording.audio_url)} preload="metadata">Your browser does not support audio.</audio>
+                                                                                ) : (
+                                                                                    <div className="p-3 bg-yellow-50 border border-yellow-100 rounded-lg text-sm text-yellow-700">Audio file not available.</div>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* Transcript */}
+                                                                        {expandedSessionSection === 'transcript' && session.recording?.transcript && (
+                                                                            <div className="max-h-64 overflow-y-auto bg-slate-50 rounded-lg p-4 border border-slate-100">
+                                                                                <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{session.recording.transcript}</p>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* AI Report */}
+                                                                        {expandedSessionSection === 'report' && session.aiInsights && (() => {
+                                                                            const report = session.aiInsights
+                                                                            return (
+                                                                                <div className="space-y-3">
+                                                                                    {report.overview && (
+                                                                                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                                                                            <h5 className="text-xs font-bold text-slate-400 uppercase mb-2">Overview</h5>
+                                                                                            <div className="grid grid-cols-2 gap-2 text-sm">
+                                                                                                {report.overview.mood && <div><span className="text-slate-500">Mood:</span> <span className="font-semibold text-slate-800">{report.overview.mood}</span></div>}
+                                                                                                {report.overview.moodScore && <div><span className="text-slate-500">Score:</span> <span className="font-semibold text-slate-800">{report.overview.moodScore}/10</span></div>}
+                                                                                                {report.overview.affect && <div><span className="text-slate-500">Affect:</span> <span className="font-semibold text-slate-800">{report.overview.affect}</span></div>}
+                                                                                                {report.overview.engagement && <div><span className="text-slate-500">Engagement:</span> <span className="font-semibold text-slate-800">{report.overview.engagement}</span></div>}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    {report.symptoms?.reported?.length > 0 && (
+                                                                                        <div className="p-3 bg-orange-50 rounded-lg border border-orange-200">
+                                                                                            <h5 className="text-xs font-bold text-orange-400 uppercase mb-2">Symptoms</h5>
+                                                                                            <div className="flex flex-wrap gap-1.5">{report.symptoms.reported.map((s, i) => <span key={i} className="px-2 py-0.5 bg-white text-orange-700 text-xs rounded-lg border border-orange-200">{s}</span>)}</div>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    {report.clinicalImpression?.possibleDiagnoses?.length > 0 && (
+                                                                                        <div className="p-3 bg-purple-50 rounded-lg border border-purple-200">
+                                                                                            <h5 className="text-xs font-bold text-purple-400 uppercase mb-2">DSM-5 Indications</h5>
+                                                                                            {report.clinicalImpression.possibleDiagnoses.map((d, i) => <div key={i} className="text-sm"><span className="font-mono text-purple-500 mr-1">{d.code}</span><span className="font-semibold text-slate-800">{d.name}</span>{d.confidence && <span className="text-xs text-purple-500 ml-2">({d.confidence})</span>}</div>)}
+                                                                                        </div>
+                                                                                    )}
+                                                                                    {report.treatmentPlan?.recommendations?.length > 0 && (
+                                                                                        <div className="p-3 bg-teal-50 rounded-lg border border-teal-200">
+                                                                                            <h5 className="text-xs font-bold text-teal-400 uppercase mb-2">Recommendations</h5>
+                                                                                            <ul className="text-sm text-slate-700 space-y-1">{report.treatmentPlan.recommendations.map((r, i) => <li key={i} className="flex items-start space-x-1.5"><span className="text-teal-500 mt-0.5">&#8226;</span><span>{r}</span></li>)}</ul>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            )
+                                                                        })()}
+
+                                                                        {/* Assessment Scores */}
+                                                                        {expandedSessionSection === 'scores' && session.assessments.length > 0 && (
+                                                                            <div className="space-y-2">
+                                                                                {session.assessments.map((a, i) => {
+                                                                                    const typeLabel = { PHQ9: 'PHQ-9', GAD7: 'GAD-7', PCL5: 'PCL-5', AUDIT: 'AUDIT', CAGE: 'CAGE', MDQ: 'MDQ' }[a._type] || a.assessment_type
+                                                                                    const maxScore = { PHQ9: 27, GAD7: 21, PCL5: 80, AUDIT: 40, CAGE: 4, MDQ: 13 }[a._type] || 27
+                                                                                    const interpFn = { PHQ9: getPhq9Interpretation, GAD7: getGad7Interpretation, PCL5: getPcl5Interpretation, AUDIT: getAuditInterpretation, CAGE: getCageInterpretation, MDQ: getMdqInterpretation }[a._type]
+                                                                                    const interp = interpFn ? interpFn(a.total_score) : { label: '', color: 'text-slate-700', bg: 'bg-slate-100' }
+                                                                                    return (
+                                                                                        <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                                                                                            <div className="flex items-center space-x-3">
+                                                                                                <span className="text-sm font-bold text-slate-800">{typeLabel}</span>
+                                                                                            </div>
+                                                                                            <div className="flex items-center space-x-3">
+                                                                                                <span className="text-sm font-bold text-slate-800">{a.total_score}/{maxScore}</span>
+                                                                                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${interp.bg} ${interp.color}`}>{interp.label}</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )
+                                                                                })}
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* No section selected prompt */}
+                                                                        {!expandedSessionSection && (
+                                                                            <p className="text-sm text-slate-400 text-center py-4">Select a tab above to view session details</p>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )
                                                 })}
@@ -1637,11 +2659,108 @@ const SessionNotes = () => {
                                         )}
                                     </div>
                                 </div>
-                            )}
+                                )
+                            })()}
 
                             {activeTab === 'export' && (
                                 <div className="p-6">
                                     <div className="space-y-6">
+                                        {/* Select Note to Export */}
+                                        <div className="bg-white border border-slate-200 rounded-xl p-6">
+                                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
+                                                <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                </svg>
+                                                <span>Select Note to Export</span>
+                                            </h3>
+                                            <div className="space-y-3">
+                                                {/* Current editor option */}
+                                                <button
+                                                    onClick={() => setExportSelectedNoteId('current')}
+                                                    className={`w-full text-left p-4 rounded-xl border-2 transition-all ${exportSelectedNoteId === 'current' ? 'border-primary-500 bg-primary-50' : 'border-slate-200 hover:border-slate-300'}`}
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center space-x-3">
+                                                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${exportSelectedNoteId === 'current' ? 'bg-primary-100 text-primary-600' : 'bg-slate-100 text-slate-500'}`}>
+                                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                </svg>
+                                                            </div>
+                                                            <div>
+                                                                <p className="font-bold text-slate-800">Current Editor Content</p>
+                                                                <p className="text-xs text-slate-500">Export what's currently in the editor</p>
+                                                            </div>
+                                                        </div>
+                                                        {exportSelectedNoteId === 'current' && (
+                                                            <svg className="w-5 h-5 text-primary-600" fill="currentColor" viewBox="0 0 20 20">
+                                                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                            </svg>
+                                                        )}
+                                                    </div>
+                                                </button>
+
+                                                {/* Divider */}
+                                                {savedNotes.length > 0 && (
+                                                    <div className="flex items-center space-x-3 py-1">
+                                                        <div className="flex-1 h-px bg-slate-200"></div>
+                                                        <span className="text-xs font-bold text-slate-400 uppercase">Saved Notes</span>
+                                                        <div className="flex-1 h-px bg-slate-200"></div>
+                                                    </div>
+                                                )}
+
+                                                {/* Saved notes list */}
+                                                <div className="max-h-72 overflow-y-auto space-y-2">
+                                                    {savedNotes.map(note => {
+                                                        const d = new Date(note.created_at)
+                                                        const dateLabel = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                                                        const timeLabel = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+                                                        const plainText = (note.content?.replace(/<[^>]*>/g, '') || '').replace(/\s*—?\s*click to annotate\s*/gi, ' ').replace(/\s+/g, ' ').trim()
+                                                        const preview = plainText.length > 80 ? plainText.substring(0, 80) + '...' : plainText
+                                                        const isSelected = String(exportSelectedNoteId) === String(note.id)
+
+                                                        return (
+                                                            <button
+                                                                key={note.id}
+                                                                onClick={() => setExportSelectedNoteId(String(note.id))}
+                                                                className={`w-full text-left p-4 rounded-xl border-2 transition-all ${isSelected ? 'border-primary-500 bg-primary-50' : 'border-slate-200 hover:border-slate-300'}`}
+                                                            >
+                                                                <div className="flex items-center justify-between">
+                                                                    <div className="flex items-center space-x-3 min-w-0">
+                                                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${isSelected ? 'bg-primary-100 text-primary-600' : 'bg-slate-100 text-slate-500'}`}>
+                                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                                            </svg>
+                                                                        </div>
+                                                                        <div className="min-w-0">
+                                                                            <div className="flex items-center space-x-2 mb-0.5">
+                                                                                <p className="font-bold text-slate-800 text-sm truncate">{note.patient_name || 'Unknown Patient'}</p>
+                                                                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold shrink-0 ${note.status === 'Finalized' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                                                    {note.status}
+                                                                                </span>
+                                                                            </div>
+                                                                            <p className="text-xs text-slate-500">{dateLabel} at {timeLabel}</p>
+                                                                            <p className="text-xs text-slate-400 mt-1 truncate">{preview}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                    {isSelected && (
+                                                                        <svg className="w-5 h-5 text-primary-600 shrink-0 ml-2" fill="currentColor" viewBox="0 0 20 20">
+                                                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                                        </svg>
+                                                                    )}
+                                                                </div>
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+
+                                                {savedNotes.length === 0 && (
+                                                    <div className="py-4 text-center text-sm text-slate-400">
+                                                        No saved notes yet. Only current editor content can be exported.
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
                                         {/* Export Format Selection */}
                                         <div className="bg-white border border-slate-200 rounded-xl p-6">
                                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center space-x-2">
@@ -1673,11 +2792,72 @@ const SessionNotes = () => {
                                             </div>
                                         </div>
 
+                                        {/* Include Report Toggle */}
+                                        <div className="bg-white border border-slate-200 rounded-xl p-6">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center space-x-3">
+                                                    <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
+                                                        <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                        </svg>
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-bold text-slate-800">Include AI Clinical Report</p>
+                                                        <p className="text-sm text-slate-500">Append session overview, symptoms, risk assessment, DSM-5 indications, and treatment plan</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={() => setExportIncludeReport(!exportIncludeReport)}
+                                                    className={`relative w-12 h-7 rounded-full transition-colors ${exportIncludeReport ? 'bg-primary-600' : 'bg-slate-300'}`}
+                                                >
+                                                    <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${exportIncludeReport ? 'translate-x-5.5 left-0' : 'left-0.5'}`}
+                                                        style={{ transform: exportIncludeReport ? 'translateX(22px)' : 'translateX(0)' }}
+                                                    />
+                                                </button>
+                                            </div>
+                                            {exportIncludeReport && (() => {
+                                                // Check if selected note has insights
+                                                let hasInsights = false
+                                                if (exportSelectedNoteId === 'current') {
+                                                    hasInsights = !!aiSummary
+                                                } else {
+                                                    const allNotes = [...savedNotes, ...patientSessions]
+                                                    const note = allNotes.find(n => String(n.id) === String(exportSelectedNoteId))
+                                                    hasInsights = !!(note?.ai_insights)
+                                                }
+                                                return !hasInsights ? (
+                                                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700 flex items-center space-x-2">
+                                                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                        </svg>
+                                                        <span>No AI report available for the selected note. The export will include only the note content.</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700 flex items-center space-x-2">
+                                                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                        </svg>
+                                                        <span>AI report will be appended to the export.</span>
+                                                    </div>
+                                                )
+                                            })()}
+                                        </div>
+
                                         {/* Export Button */}
                                         <div className="flex items-center justify-between p-6 bg-slate-50 rounded-xl">
                                             <div>
                                                 <p className="font-semibold text-slate-800">Ready to export</p>
-                                                <p className="text-sm text-slate-500">{exportFormat} format</p>
+                                                <p className="text-sm text-slate-500">
+                                                    {exportFormat} format{exportIncludeReport ? ' + AI Report' : ''} — {exportSelectedNoteId === 'current'
+                                                        ? 'Current editor content'
+                                                        : (() => {
+                                                            const n = savedNotes.find(s => String(s.id) === String(exportSelectedNoteId))
+                                                            if (!n) return 'Selected note'
+                                                            const d = new Date(n.created_at)
+                                                            return (n.patient_name || 'Unknown') + ' — ' + d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                                                        })()
+                                                    }
+                                                </p>
                                             </div>
                                             <button onClick={handleDownloadExport} className="btn-primary px-8 py-3 flex items-center space-x-2">
                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1803,6 +2983,21 @@ const SessionNotes = () => {
                                                 setNoteContent(viewingNote.content)
                                             }
                                             setSelectedPatientId(viewingNote.patient_id?.toString() || selectedPatientId)
+                                            setEditingNoteId(viewingNote.id)
+                                            setSelectedSessionId(String(viewingNote.id))
+
+                                            // Load AI insights from the note
+                                            if (viewingNote.ai_insights) {
+                                                try {
+                                                    const insights = typeof viewingNote.ai_insights === 'string' ? JSON.parse(viewingNote.ai_insights) : viewingNote.ai_insights
+                                                    setAiSummary(insights)
+                                                    setClinicalSummary(insights)
+                                                } catch {
+                                                    setAiSummary(null)
+                                                    setClinicalSummary(null)
+                                                }
+                                            }
+
                                             setViewingNote(null)
                                             setActiveTab('editor')
                                         }}

@@ -15,6 +15,12 @@ import Journals from './components/Journals'
 import ProtectedRoute from './components/ProtectedRoute'
 import './dashboard.css'
 
+import PHQ9Assessment from './components/PHQ9Assessment'
+import GAD7Assessment from './components/GAD7Assessment'
+import PCL5Assessment from './components/PCL5Assessment'
+import AUDITAssessment from './components/AUDITAssessment'
+import CAGEAssessment from './components/CAGEAssessment'
+import MDQAssessment from './components/MDQAssessment'
 import { AuthProvider } from './context/AuthContext'
 import Login from './components/Login'
 import Signup from './components/Signup'
@@ -27,6 +33,12 @@ function App() {
                     <Route path="/login" element={<Login />} />
                     <Route path="/signup" element={<Signup />} />
                     <Route path="/admin-login" element={<AdminLogin />} />
+                    <Route path="/assessment/phq9/:token" element={<PHQ9Assessment />} />
+                    <Route path="/assessment/gad7/:token" element={<GAD7Assessment />} />
+                    <Route path="/assessment/pcl5/:token" element={<PCL5Assessment />} />
+                    <Route path="/assessment/audit/:token" element={<AUDITAssessment />} />
+                    <Route path="/assessment/cage/:token" element={<CAGEAssessment />} />
+                    <Route path="/assessment/mdq/:token" element={<MDQAssessment />} />
 
                     <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
                         <Route path="/dashboard" element={<Dashboard />} />

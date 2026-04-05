@@ -92,9 +92,36 @@ export const aiService = {
 
 export const clinicalService = {
     getHistory: (patientId) => api.get(`/clinical/history/${patientId}`),
+    addHistory: (patientId, data) => api.post(`/clinical/history/${patientId}`, data),
+    updateHistory: (historyId, data) => api.put(`/clinical/history/${historyId}`, data),
+    deleteHistory: (historyId) => api.delete(`/clinical/history/${historyId}`),
     getMedications: (patientId) => api.get(`/clinical/medications/${patientId}`),
+    addMedication: (patientId, data) => api.post(`/clinical/medications/${patientId}`, data),
+    updateMedication: (id, data) => api.put(`/clinical/medications/${id}`, data),
+    deleteMedication: (id) => api.delete(`/clinical/medications/${id}`),
     getDiagnoses: (patientId) => api.get(`/clinical/diagnoses/${patientId}`),
+    addDiagnosis: (patientId, data) => api.post(`/clinical/diagnoses/${patientId}`, data),
+    updateDiagnosis: (id, data) => api.put(`/clinical/diagnoses/${id}`, data),
+    deleteDiagnosis: (id) => api.delete(`/clinical/diagnoses/${id}`),
     getTreatmentPlans: (patientId) => api.get(`/clinical/treatment-plans/${patientId}`),
+    addTreatmentPlan: (patientId, data) => api.post(`/clinical/treatment-plans/${patientId}`, data),
+    updateTreatmentPlan: (id, data) => api.put(`/clinical/treatment-plans/${id}`, data),
+    deleteTreatmentPlan: (id) => api.delete(`/clinical/treatment-plans/${id}`),
+};
+
+export const sessionService = {
+    create: (data) => api.post('/sessions', data),
+    getById: (id) => api.get(`/sessions/${id}`),
+    getByPatientId: (patientId) => api.get(`/sessions/patient/${patientId}`),
+    update: (id, data) => api.patch(`/sessions/${id}`, data),
+};
+
+export const assessmentService = {
+    createToken: (data) => api.post('/assessments/token', data),
+    getResponses: (patientId, type) => api.get(`/assessments/responses/${patientId}`, { params: type ? { type } : {} }),
+    // Public (no auth) - use raw axios
+    validateToken: (token) => axios.get(`${API_URL}/assessments/public/${token}`),
+    submitResponse: (token, data) => axios.post(`${API_URL}/assessments/public/${token}/submit`, data),
 };
 
 export const imageService = {
