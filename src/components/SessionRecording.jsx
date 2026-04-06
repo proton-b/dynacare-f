@@ -846,8 +846,8 @@ const SessionRecording = () => {
                   </div>
                 )}
 
-                {/* Drop Zone */}
-                <div
+                {/* Drop Zone — hidden while uploading */}
+                {!uploading && <div
                   className={`relative border-2 border-dashed rounded-2xl p-10 text-center transition-all cursor-pointer ${uploadFile
                     ? 'border-primary-400 bg-primary-50'
                     : 'border-slate-300 hover:border-primary-400 hover:bg-slate-50'
@@ -858,7 +858,7 @@ const SessionRecording = () => {
                     e.preventDefault()
                     e.stopPropagation()
                     const file = e.dataTransfer.files[0]
-                    if (file && file.type.startsWith('audio/')) {
+                    if (file && (file.type.startsWith('audio/') || file.type === 'video/mp4' || file.type === 'video/mpeg' || file.type === 'application/octet-stream')) {
                       setUploadFile(file)
                       setUploadError('')
                     } else {
@@ -869,7 +869,7 @@ const SessionRecording = () => {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="audio/*"
+                    accept="audio/*,.mp3,.wav,.m4a,.ogg,.webm,.aac,.flac,.mpeg,.mpg,.mp4"
                     onChange={handleFileSelect}
                     className="hidden"
                   />
@@ -906,14 +906,14 @@ const SessionRecording = () => {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-slate-700">Click to browse or drag & drop</p>
-                        <p className="text-xs text-slate-400 mt-1">MP3, WAV, M4A, OGG, WebM, AAC, FLAC (max 100MB)</p>
+                        <p className="text-xs text-slate-400 mt-1">MP3, WAV, M4A, OGG, WebM, AAC, FLAC, MPEG, MP4 (max 100MB)</p>
                       </div>
                     </div>
                   )}
-                </div>
+                </div>}
 
-                {/* Optional Fields */}
-                <div className="space-y-4 mt-6">
+                {/* Optional Fields — hidden while uploading */}
+                {!uploading && <div className="space-y-4 mt-6">
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-2">Duration (optional)</label>
                     <input
@@ -935,7 +935,7 @@ const SessionRecording = () => {
                     />
                     <p className="text-xs text-slate-400 mt-1.5">If left empty, the audio will be automatically transcribed using AI (Whisper). You can also paste notes to use instead.</p>
                   </div>
-                </div>
+                </div>}
 
                 {/* Upload Progress */}
                 {uploading && (
@@ -991,10 +991,16 @@ const SessionRecording = () => {
                     )}
 
                     {uploadStep === 'transcribing' && (
-                      <p className="text-sm text-slate-500">Transcribing audio with AI (Whisper)...</p>
+                      <div className="flex items-center space-x-3 py-2">
+                        <div className="w-6 h-6 border-[3px] border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+                        <p className="text-sm font-medium text-slate-600">Transcribing audio with AI (Whisper)... This may take a moment.</p>
+                      </div>
                     )}
                     {uploadStep === 'summarizing' && (
-                      <p className="text-sm text-slate-500">Generating clinical summary...</p>
+                      <div className="flex items-center space-x-3 py-2">
+                        <div className="w-6 h-6 border-[3px] border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+                        <p className="text-sm font-medium text-slate-600">Generating clinical summary...</p>
+                      </div>
                     )}
                   </div>
                 )}

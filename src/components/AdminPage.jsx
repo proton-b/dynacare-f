@@ -27,6 +27,12 @@ const AdminPage = () => {
     const [assignForm, setAssignForm] = useState({ user_id: '', journal_id: '' })
     const [assigning, setAssigning] = useState(false)
     const [assignMsg, setAssignMsg] = useState({ type: '', text: '' })
+    const [showPasswordModal, setShowPasswordModal] = useState(false)
+    const [passwordDoctor, setPasswordDoctor] = useState(null)
+    const [newPassword, setNewPassword] = useState('')
+    const [passwordError, setPasswordError] = useState('')
+    const [passwordSuccess, setPasswordSuccess] = useState('')
+    const [updatingPassword, setUpdatingPassword] = useState(false)
 
     const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}')
 
@@ -137,6 +143,37 @@ const AdminPage = () => {
             setCreateError(err.response?.data?.message || `Failed to create ${createType} credentials`)
         } finally {
             setCreating(false)
+        }
+    }
+
+    const openPasswordModal = (doctor) => {
+        setPasswordDoctor(doctor)
+        setNewPassword('')
+        setPasswordError('')
+        setPasswordSuccess('')
+        setShowPasswordModal(true)
+    }
+
+    const handleUpdatePassword = async (e) => {
+        e.preventDefault()
+        if (newPassword.length < 6) {
+            setPasswordError('Password must be at least 6 characters')
+            return
+        }
+        setUpdatingPassword(true)
+        setPasswordError('')
+        setPasswordSuccess('')
+        try {
+            await adminService.updateDoctorPassword(passwordDoctor.id, newPassword)
+            setPasswordSuccess('Password updated successfully!')
+            setTimeout(() => {
+                setShowPasswordModal(false)
+                setPasswordSuccess('')
+            }, 1500)
+        } catch (err) {
+            setPasswordError(err.response?.data?.message || 'Failed to update password')
+        } finally {
+            setUpdatingPassword(false)
         }
     }
 
@@ -353,6 +390,7 @@ const AdminPage = () => {
                                         <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">License #</th>
                                         <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Phone</th>
                                         <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Joined</th>
+                                        <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -380,11 +418,20 @@ const AdminPage = () => {
                                             <td className="px-6 py-4 text-sm text-slate-500">
                                                 {new Date(doc.created_at).toLocaleDateString()}
                                             </td>
+                                            <td className="px-6 py-4">
+                                                <button
+                                                    onClick={() => openPasswordModal(doc)}
+                                                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 text-xs font-semibold rounded-lg hover:bg-amber-100 transition-colors border border-amber-200"
+                                                >
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
+                                                    <span>Edit Password</span>
+                                                </button>
+                                            </td>
                                         </tr>
                                     ))}
                                     {filteredDoctors.length === 0 && (
                                         <tr>
-                                            <td colSpan="7" className="px-6 py-8 text-center text-slate-400">
+                                            <td colSpan="8" className="px-6 py-8 text-center text-slate-400">
                                                 No doctors found
                                             </td>
                                         </tr>
@@ -852,6 +899,64 @@ const AdminPage = () => {
                                     }`}
                                 >
                                     {creating ? 'Creating...' : `Create ${createType === 'admin' ? 'Admin' : 'Doctor'}`}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Password Modal */}
+            {showPasswordModal && passwordDoctor && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+                        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-800">Edit Password</h3>
+                                <p className="text-sm text-slate-500 mt-0.5">{passwordDoctor.full_name} ({passwordDoctor.email})</p>
+                            </div>
+                            <button
+                                onClick={() => { setShowPasswordModal(false); setPasswordError(''); setPasswordSuccess('') }}
+                                className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+                            >
+                                <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <form onSubmit={handleUpdatePassword} className="p-6 space-y-4">
+                            {passwordError && (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{passwordError}</div>
+                            )}
+                            {passwordSuccess && (
+                                <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">{passwordSuccess}</div>
+                            )}
+                            <div>
+                                <label className="block text-sm font-semibold text-slate-700 mb-1.5">New Password</label>
+                                <input
+                                    type="password"
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    placeholder="Minimum 6 characters"
+                                    required
+                                    minLength={6}
+                                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                />
+                            </div>
+                            <div className="flex justify-end space-x-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => { setShowPasswordModal(false); setPasswordError(''); setPasswordSuccess('') }}
+                                    className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={updatingPassword}
+                                    className="px-5 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors disabled:opacity-50"
+                                >
+                                    {updatingPassword ? 'Updating...' : 'Update Password'}
                                 </button>
                             </div>
                         </form>

@@ -170,6 +170,7 @@ export const adminService = {
     getDoctorPatientCounts: () => adminApi.get('/admin/doctor-patient-counts'),
     createDoctor: (doctorData) => adminApi.post('/admin/create-doctor', doctorData),
     createAdmin: (adminData) => adminApi.post('/admin/create-admin', adminData),
+    updateDoctorPassword: (id, password) => adminApi.patch(`/admin/doctor/${id}/password`, { password }),
     getJournals: () => adminApi.get('/admin/journals'),
     getJournalAssignments: () => adminApi.get('/admin/journal-assignments'),
     assignJournal: (userId, journalId) => adminApi.post('/admin/assign-journal', { user_id: userId, journal_id: journalId }),
