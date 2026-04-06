@@ -87,11 +87,24 @@ const SessionNotes = () => {
         return `${baseUrl}${imageUrl}`
     }
 
-    const getAudioUrl = (audioUrl) => {
+    const getAudioUrl = (audioUrl, recordingId) => {
         if (!audioUrl) return ''
+        if (recordingId) {
+            const token = localStorage.getItem('token')
+            return `${API_URL}/recordings/${recordingId}/stream?token=${token}`
+        }
         if (audioUrl.startsWith('http')) return audioUrl
         const baseUrl = API_URL.replace('/api', '')
         return `${baseUrl}${audioUrl}`
+    }
+
+    const handleDownloadAudio = (recordingId, format) => {
+        const token = localStorage.getItem('token')
+        const url = `${API_URL}/recordings/${recordingId}/stream?download=true&token=${token}`
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `recording_${recordingId}.${format || 'mp3'}`
+        a.click()
     }
 
     useEffect(() => {
@@ -985,6 +998,10 @@ const SessionNotes = () => {
                 window.open(link, '_blank')
             } else {
                 setAssessmentLink(link)
+                navigator.clipboard.writeText(link).then(() => {
+                    setLinkCopied(true)
+                    setTimeout(() => setLinkCopied(false), 2000)
+                })
             }
         } catch (err) {
             console.error('Error generating assessment link:', err)
@@ -2570,7 +2587,16 @@ const SessionNotes = () => {
                                                                                     </div>
                                                                                 </div>
                                                                                 {session.recording.audio_url ? (
-                                                                                    <audio controls className="w-full" src={getAudioUrl(session.recording.audio_url)} preload="metadata">Your browser does not support audio.</audio>
+                                                                                    <div>
+                                                                                        <audio controls className="w-full" src={getAudioUrl(session.recording.audio_url, session.recording.id)} preload="metadata">Your browser does not support audio.</audio>
+                                                                                        <button
+                                                                                            onClick={() => handleDownloadAudio(session.recording.id, session.recording.format)}
+                                                                                            className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1.5 bg-purple-50 text-purple-700 text-xs font-semibold rounded-lg hover:bg-purple-100 transition-colors border border-purple-200"
+                                                                                        >
+                                                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                                                                            <span>Download Audio</span>
+                                                                                        </button>
+                                                                                    </div>
                                                                                 ) : (
                                                                                     <div className="p-3 bg-yellow-50 border border-yellow-100 rounded-lg text-sm text-yellow-700">Audio file not available.</div>
                                                                                 )}

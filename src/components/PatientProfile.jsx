@@ -11,11 +11,24 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 
 const API_URL = import.meta.env.VITE_BACKEND_URL
 
-const getAudioUrl = (audioUrl) => {
+const getAudioUrl = (audioUrl, recordingId) => {
     if (!audioUrl) return ''
+    if (recordingId) {
+        const token = localStorage.getItem('token')
+        return `${API_URL}/recordings/${recordingId}/stream?token=${token}`
+    }
     if (audioUrl.startsWith('http')) return audioUrl
     const baseUrl = API_URL.replace('/api', '')
     return `${baseUrl}${audioUrl}`
+}
+
+const handleDownloadAudio = (recordingId, format) => {
+    const token = localStorage.getItem('token')
+    const url = `${API_URL}/recordings/${recordingId}/stream?download=true&token=${token}`
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `recording_${recordingId}.${format || 'mp3'}`
+    a.click()
 }
 
 const PatientProfile = () => {
@@ -297,13 +310,9 @@ const PatientProfile = () => {
         setOpenExportMenuId(null)
     }
 
-    const handleDownloadAudio = (rec) => {
+    const handleDownloadAudioRec = (rec) => {
         if (!rec.audio_url) return alert('No audio file available.')
-        const a = document.createElement('a')
-        a.href = getAudioUrl(rec.audio_url)
-        a.download = `Recording_${patient?.full_name?.replace(/\s+/g, '_') || 'Patient'}_${new Date(rec.created_at).toISOString().split('T')[0]}.${rec.format || 'mp3'}`
-        a.target = '_blank'
-        a.click()
+        handleDownloadAudio(rec.id, rec.format)
         setOpenExportMenuId(null)
     }
 
@@ -712,11 +721,18 @@ const PatientProfile = () => {
                                                                 <audio
                                                                     controls
                                                                     className="w-full h-10"
-                                                                    src={getAudioUrl(session.audio_url)}
+                                                                    src={getAudioUrl(session.audio_url, session.recording_id || session.id)}
                                                                     preload="metadata"
                                                                 >
                                                                     Your browser does not support the audio element.
                                                                 </audio>
+                                                                <button
+                                                                    onClick={() => handleDownloadAudio(session.recording_id || session.id, session.format)}
+                                                                    className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1.5 bg-purple-50 text-purple-700 text-xs font-semibold rounded-lg hover:bg-purple-100 transition-colors border border-purple-200"
+                                                                >
+                                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                                                    <span>Download Audio</span>
+                                                                </button>
                                                                 {session.transcript && (
                                                                     <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-100 max-h-32 overflow-y-auto">
                                                                         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Transcript</p>
@@ -974,7 +990,7 @@ const PatientProfile = () => {
                                                                                                 </div>
                                                                                             </button>
                                                                                             <button
-                                                                                                onClick={() => handleDownloadAudio(rec)}
+                                                                                                onClick={() => handleDownloadAudioRec(rec)}
                                                                                                 disabled={!rec.audio_url}
                                                                                                 className="w-full px-4 py-2.5 text-left text-sm flex items-center space-x-3 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
                                                                                             >
@@ -997,15 +1013,24 @@ const PatientProfile = () => {
                                                                     {expandedAudioId === rec.id && (
                                                                         <div className="mt-4 pt-4 border-t border-slate-100">
                                                                             {rec.audio_url ? (
-                                                                                <audio
-                                                                                    controls
-                                                                                    autoPlay
-                                                                                    className="w-full"
-                                                                                    src={getAudioUrl(rec.audio_url)}
-                                                                                    preload="metadata"
-                                                                                >
-                                                                                    Your browser does not support the audio element.
-                                                                                </audio>
+                                                                                <div>
+                                                                                    <audio
+                                                                                        controls
+                                                                                        autoPlay
+                                                                                        className="w-full"
+                                                                                        src={getAudioUrl(rec.audio_url, rec.id)}
+                                                                                        preload="metadata"
+                                                                                    >
+                                                                                        Your browser does not support the audio element.
+                                                                                    </audio>
+                                                                                    <button
+                                                                                        onClick={() => handleDownloadAudio(rec.id, rec.format)}
+                                                                                        className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1.5 bg-purple-50 text-purple-700 text-xs font-semibold rounded-lg hover:bg-purple-100 transition-colors border border-purple-200"
+                                                                                    >
+                                                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                                                                        <span>Download Audio</span>
+                                                                                    </button>
+                                                                                </div>
                                                                             ) : (
                                                                                 <div className="p-3 bg-yellow-50 border border-yellow-100 rounded-lg text-sm text-yellow-700">
                                                                                     Audio file not available for this recording.

@@ -69,7 +69,10 @@ const SessionRecording = () => {
     { code: 'en-US', label: 'English (US)' },
     { code: 'en-GB', label: 'English (UK)' },
     { code: 'ar-SA', label: 'Arabic (العربية)' },
+    { code: 'fr-HT', label: 'Creole (Kreyòl Ayisyen)', whisperOnly: true, whisperCode: 'ht' },
   ]
+
+  const getSelectedLangConfig = () => supportedLanguages.find(l => l.code === selectedLang) || supportedLanguages[0]
 
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
@@ -208,8 +211,15 @@ const SessionRecording = () => {
 
       mediaRecorderRef.current.start();
 
-      // Start Web Speech API for live transcription in the selected language
-      if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const langConfig = getSelectedLangConfig();
+
+      // For whisperOnly languages (e.g. Creole), skip Web Speech API — transcription
+      // will happen via OpenAI Whisper after recording stops
+      if (langConfig.whisperOnly) {
+        setIsTranscribing(false);
+        console.log(`Language "${langConfig.label}" uses Whisper — live transcription disabled, will transcribe after recording stops.`);
+      } else if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        // Start Web Speech API for live transcription in the selected language
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         recognitionRef.current = new SpeechRecognition();
         recognitionRef.current.continuous = true;
@@ -303,10 +313,22 @@ const SessionRecording = () => {
 
     try {
       console.log('Step 1: Stopping media recorder and recognition...');
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      }
+
+      // Wait for the MediaRecorder to produce the final audio blob
+      const audioBlob = await new Promise((resolve) => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.onstop = () => {
+            const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+            resolve(blob);
+          };
+          mediaRecorderRef.current.stop();
+          mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+        } else {
+          // Already stopped — build blob from whatever chunks we have
+          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          resolve(blob);
+        }
+      });
 
       if (recognitionRef.current) {
         try {
@@ -320,31 +342,53 @@ const SessionRecording = () => {
       setIsRecording(false)
       setIsPaused(false)
 
+      const capturedRecordingTime = recordingTime;
+      let transcriptText = (transcript || []).map(t => t?.text || '').join(' ');
+      const langConfig = getSelectedLangConfig();
+
       console.log('Step 2: Creating session...');
       const sessionRes = await sessionService.create({ patient_id: selectedPatient });
       const sessionId = sessionRes.data.id;
       setCurrentSessionId(sessionId);
 
-      console.log('Step 3: Preparing data for upload...');
-      const transcriptText = (transcript || []).map(t => t?.text || '').join(' ');
-      const newRecordingData = {
-        patient_id: selectedPatient,
-        duration: formatTime(recordingTime),
-        audio_url: 'recorded_session_' + Date.now(),
-        transcript: transcriptText,
-        session_id: sessionId,
-        file_size: `${(recordingTime * 0.1).toFixed(1)} MB`,
-        format: 'wav'
-      }
+      console.log('Step 3: Uploading audio file to S3...');
+      const formData = new FormData();
+      formData.append('audio', audioBlob, `session_${sessionId}_${Date.now()}.webm`);
+      formData.append('patient_id', selectedPatient);
+      formData.append('duration', formatTime(capturedRecordingTime));
+      formData.append('session_id', sessionId);
+      formData.append('notes', transcriptText);
 
-      console.log('Step 3: Uploading recording...', newRecordingData);
-      const response = await recordingService.upload(newRecordingData);
+      const response = await recordingService.uploadAudioFile(formData);
 
       if (response.data) {
         setRecordings(prev => [response.data, ...prev]);
         setCurrentRecordingId(response.data.id);
       }
       setRecordingTime(0);
+
+      // For whisperOnly languages (e.g. Creole), transcribe via OpenAI Whisper after upload
+      if (langConfig.whisperOnly && audioBlob.size > 0) {
+        console.log(`Step 3b: Transcribing with Whisper in ${langConfig.label} (${langConfig.whisperCode})...`);
+        setTranscript([{ text: `Transcribing in ${langConfig.label} via AI...`, timestamp: '', type: 'final' }]);
+        try {
+          const whisperForm = new FormData();
+          whisperForm.append('audio', audioBlob, `whisper_${sessionId}.webm`);
+          whisperForm.append('language', langConfig.whisperCode);
+          const whisperRes = await recordingService.transcribeAudio(whisperForm);
+          if (whisperRes.data?.success && whisperRes.data.transcript) {
+            transcriptText = whisperRes.data.transcript;
+            setTranscript([{ text: transcriptText, timestamp: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }), type: 'final' }]);
+          }
+        } catch (whisperErr) {
+          console.error('Whisper transcription failed:', whisperErr);
+        }
+      }
+
+      // Update transcript on the recording
+      if (response.data && transcriptText) {
+        await recordingService.update(response.data.id, { transcript: transcriptText });
+      }
 
       console.log('Step 4: Checking transcript for summary generation...');
       if (transcriptText && transcriptText.trim().length > 0) {
@@ -354,7 +398,7 @@ const SessionRecording = () => {
           const summaryResponse = await recordingService.generateClinicalSummary({
             transcript: transcriptText,
             patient_id: selectedPatient,
-            duration: formatTime(recordingTime),
+            duration: formatTime(capturedRecordingTime),
             journals: getSelectedJournalNames()
           });
 
