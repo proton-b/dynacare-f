@@ -645,6 +645,25 @@ const SessionNotes = () => {
                             }
                         }
                         setShowSummaryModal(true)
+
+                        // Auto-save the generated report as a PDF in "Previous Reports" — background upload, no local download
+                        try {
+                            const patientData = patients.find(p => p.id === parseInt(selectedPatientId))
+                            const patientName = patientData?.full_name || 'Patient'
+                            exportClinicalSummaryToPDF(
+                                summaryResponse.data.summary,
+                                patientName,
+                                null,
+                                {
+                                    patientId: selectedPatientId,
+                                    sessionId: recordingId,
+                                    title: `Clinical Summary — ${new Date().toLocaleDateString()}`,
+                                    skipLocalSave: true,
+                                }
+                            )
+                        } catch (autoSaveErr) {
+                            console.warn('Auto-save of generated report failed:', autoSaveErr)
+                        }
                     }
                 } catch (summaryError) {
                     console.error('Error generating summary:', summaryError)
@@ -890,16 +909,10 @@ const SessionNotes = () => {
     }
 
     const handleSaveNote = async () => {
-        const content = noteContent || getEditorContent()
-        const textContent = content?.replace(/<[^>]*>/g, '') || ''
+        const content = noteContent || getEditorContent() || ''
 
         if (!selectedPatientId) {
             alert("Please select a patient before saving.");
-            return;
-        }
-
-        if (!textContent.trim()) {
-            alert("Please enter some content before saving.");
             return;
         }
 
@@ -1619,6 +1632,16 @@ const SessionNotes = () => {
                                             </button>
                                         ))}
                                     </div>
+                                    <button
+                                        onClick={handleSaveNote}
+                                        disabled={isSaving}
+                                        className={`btn-primary text-sm flex items-center space-x-2 mr-2 ${isSaving ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                    >
+                                        {isSaving ? (
+                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                        ) : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>}
+                                        <span>{isSaving ? 'Saving...' : editingNoteId ? 'Update' : 'Save'}</span>
+                                    </button>
                                 </div>
                             </div>
                         )}
@@ -3125,7 +3148,9 @@ const SessionNotes = () => {
                                     onClick={() => {
                                         const selectedPatientData = patients.find(p => p.id === parseInt(selectedPatientId));
                                         const patientName = selectedPatientData?.full_name || 'Patient';
-                                        exportClinicalSummaryToPDF(clinicalSummary, patientName);
+                                        exportClinicalSummaryToPDF(clinicalSummary, patientName, null, {
+                                            patientId: selectedPatientData?.id,
+                                        });
                                     }}
                                     className="px-6 py-3 bg-white border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50 font-bold rounded-xl transition-all flex items-center space-x-2"
                                 >

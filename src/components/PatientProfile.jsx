@@ -293,7 +293,10 @@ const PatientProfile = () => {
         if (rec.harrison_summary) {
             try { harrisonData = typeof rec.harrison_summary === 'string' ? JSON.parse(rec.harrison_summary) : rec.harrison_summary } catch {}
         }
-        exportClinicalSummaryToPDF(summaryForPdf, patient?.full_name || 'Patient', harrisonData)
+        exportClinicalSummaryToPDF(summaryForPdf, patient?.full_name || 'Patient', harrisonData, {
+            patientId: patient?.id,
+            sessionId: rec.session_id || rec.id,
+        })
         setOpenExportMenuId(null)
     }
 
@@ -1418,12 +1421,13 @@ const PatientProfile = () => {
 
                             const allScores = recsWithScores.map(r => r.scores)
 
-                            const avgSeverity = allScores.length > 0
-                                ? Math.round(allScores.reduce((sum, s) => sum + s.symptomSeverity, 0) / allScores.length * 10) / 10
+                            const avg = (key) => allScores.length > 0
+                                ? Math.round(allScores.reduce((sum, s) => sum + (s[key] || 0), 0) / allScores.length * 10) / 10
                                 : null
-                            const avgEmotional = allScores.length > 0
-                                ? Math.round(allScores.reduce((sum, s) => sum + s.emotionalAdherenceScore, 0) / allScores.length * 10) / 10
-                                : null
+                            const avgMood = avg('moodScore')
+                            const avgSymptomScore = avg('symptomScore')
+                            const avgSeverity = avg('symptomSeverity')
+                            const avgEmotional = avg('emotionalAdherenceScore')
 
                             // Build chart data: one point per report
                             const chartData = recsWithScores.map((r, i) => ({
@@ -1476,42 +1480,46 @@ const PatientProfile = () => {
                                     )}
 
                                     {/* Summary cards */}
-                                    <div className="grid grid-cols-2 gap-6">
-                                        <div className="text-center">
-                                            <div className="flex items-center justify-center space-x-2 mb-2">
-                                                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                                                <span className="text-sm text-slate-600">Avg Symptom Severity</span>
+                                    {(() => {
+                                        // Color thresholds:
+                                        //   higher-is-better (Mood, Emotional Adherence): >=7 green, 4-6 yellow, <=3 red
+                                        //   lower-is-better  (Symptom Score, Symptom Severity): <=3 green, 4-6 yellow, >=7 red
+                                        const higherBetter = (v) => v === null ? 'text-slate-800' : v >= 7 ? 'text-green-600' : v >= 4 ? 'text-yellow-600' : 'text-red-600'
+                                        const higherBetterBar = (v) => v >= 7 ? 'bg-green-500' : v >= 4 ? 'bg-yellow-500' : 'bg-red-500'
+                                        const lowerBetter = (v) => v === null ? 'text-slate-800' : v <= 3 ? 'text-green-600' : v <= 6 ? 'text-yellow-600' : 'text-red-600'
+                                        const lowerBetterBar = (v) => v <= 3 ? 'bg-green-500' : v <= 6 ? 'bg-yellow-500' : 'bg-red-500'
+
+                                        const cards = [
+                                            { label: 'Avg Emotional Adherence', value: avgEmotional, dot: 'bg-teal-500', textCls: higherBetter, barCls: higherBetterBar },
+                                            { label: 'Avg Mood Score',          value: avgMood,      dot: 'bg-violet-500', textCls: higherBetter, barCls: higherBetterBar },
+                                            { label: 'Avg Symptom Score',       value: avgSymptomScore, dot: 'bg-orange-500', textCls: lowerBetter, barCls: lowerBetterBar },
+                                            { label: 'Avg Symptom Severity',    value: avgSeverity,  dot: 'bg-blue-500',   textCls: lowerBetter, barCls: lowerBetterBar },
+                                        ]
+
+                                        return (
+                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                                                {cards.map((c) => (
+                                                    <div key={c.label} className="text-center">
+                                                        <div className="flex items-center justify-center space-x-2 mb-2">
+                                                            <div className={`w-3 h-3 ${c.dot} rounded-full`}></div>
+                                                            <span className="text-sm text-slate-600">{c.label}</span>
+                                                        </div>
+                                                        <div className={`text-3xl font-bold ${c.textCls(c.value)}`}>
+                                                            {c.value !== null ? c.value : '--'}
+                                                        </div>
+                                                        <div className="text-sm text-slate-400">
+                                                            {c.value !== null ? `${allScores.length} report${allScores.length > 1 ? 's' : ''} / 10` : 'No data'}
+                                                        </div>
+                                                        {c.value !== null && (
+                                                            <div className="mt-2 w-full bg-slate-200 rounded-full h-2">
+                                                                <div className={`h-2 rounded-full ${c.barCls(c.value)}`} style={{ width: `${(c.value / 10) * 100}%` }}></div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
                                             </div>
-                                            <div className={`text-3xl font-bold ${avgSeverity !== null ? (avgSeverity <= 3 ? 'text-green-600' : avgSeverity <= 6 ? 'text-yellow-600' : 'text-red-600') : 'text-slate-800'}`}>
-                                                {avgSeverity !== null ? avgSeverity : '--'}
-                                            </div>
-                                            <div className="text-sm text-slate-400">
-                                                {avgSeverity !== null ? `${allScores.length} report${allScores.length > 1 ? 's' : ''} / 10` : 'No data'}
-                                            </div>
-                                            {avgSeverity !== null && (
-                                                <div className="mt-2 w-full bg-slate-200 rounded-full h-2">
-                                                    <div className={`h-2 rounded-full ${avgSeverity <= 3 ? 'bg-green-500' : avgSeverity <= 6 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${(avgSeverity / 10) * 100}%` }}></div>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="text-center">
-                                            <div className="flex items-center justify-center space-x-2 mb-2">
-                                                <div className="w-3 h-3 bg-teal-500 rounded-full"></div>
-                                                <span className="text-sm text-slate-600">Avg Emotional Adherence</span>
-                                            </div>
-                                            <div className={`text-3xl font-bold ${avgEmotional !== null ? (avgEmotional >= 7 ? 'text-green-600' : avgEmotional >= 4 ? 'text-yellow-600' : 'text-red-600') : 'text-slate-800'}`}>
-                                                {avgEmotional !== null ? avgEmotional : '--'}
-                                            </div>
-                                            <div className="text-sm text-slate-400">
-                                                {avgEmotional !== null ? `${allScores.length} report${allScores.length > 1 ? 's' : ''} / 10` : 'No data'}
-                                            </div>
-                                            {avgEmotional !== null && (
-                                                <div className="mt-2 w-full bg-slate-200 rounded-full h-2">
-                                                    <div className={`h-2 rounded-full ${avgEmotional >= 7 ? 'bg-green-500' : avgEmotional >= 4 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${(avgEmotional / 10) * 100}%` }}></div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
+                                        )
+                                    })()}
                                 </div>
                             )
                         })()}

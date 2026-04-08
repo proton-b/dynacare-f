@@ -1,7 +1,31 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { reportService } from '../services/api';
 
-export const exportClinicalSummaryToPDF = (summary, patientName, harrisonSummary = null) => {
+// Upload the generated PDF to the backend so it appears in "Previous Reports".
+// Failures here must NOT block the local download — we just warn.
+const persistReportToBackend = async (pdfDoc, filename, { patientId, sessionId, title, summary, harrisonSummary }) => {
+    if (!patientId) return; // nothing to do if we don't know the patient
+    try {
+        const blob = pdfDoc.output('blob');
+        const formData = new FormData();
+        formData.append('file', blob, filename);
+        formData.append('patient_id', String(patientId));
+        if (sessionId) formData.append('session_id', String(sessionId));
+        if (title) formData.append('title', title);
+        // Combined summary payload for future searching/preview
+        try {
+            formData.append('summary', JSON.stringify({ dsm5: summary || null, harrison: harrisonSummary || null }));
+        } catch { /* ignore JSON errors */ }
+
+        await reportService.upload(formData);
+        console.log('Report uploaded to backend successfully');
+    } catch (err) {
+        console.warn('Failed to persist report to backend:', err?.response?.data?.message || err.message);
+    }
+};
+
+export const exportClinicalSummaryToPDF = (summary, patientName, harrisonSummary = null, options = {}) => {
     try {
         console.log('Starting PDF export...');
         console.log('Summary data:', summary);
@@ -320,11 +344,29 @@ export const exportClinicalSummaryToPDF = (summary, patientName, harrisonSummary
         // Save the PDF
         const filename = `Clinical_Summary_${patientName?.replace(/\s+/g, '_') || 'Patient'}_${new Date().toISOString().split('T')[0]}.pdf`;
         console.log('Saving PDF as:', filename);
-        doc.save(filename);
-        console.log('PDF export completed successfully!');
 
-        // Show success message
-        alert('✅ PDF exported successfully! Check your Downloads folder.');
+        // skipLocalSave is used by the backfill flow — only persist to backend, no local download / no alert
+        if (!options.skipLocalSave) {
+            doc.save(filename);
+            console.log('PDF export completed successfully!');
+        }
+
+        // Persist a copy on the backend (S3) for "Previous Reports"
+        // Returns a promise so the backfill flow can await it
+        const uploadPromise = persistReportToBackend(doc, filename, {
+            patientId: options.patientId,
+            sessionId: options.sessionId,
+            title: options.title || `Clinical Summary — ${patientName || 'Patient'}`,
+            summary,
+            harrisonSummary,
+        });
+
+        if (!options.skipLocalSave) {
+            // Show success message (only for interactive exports)
+            alert('✅ PDF exported successfully! Check your Downloads folder.');
+        }
+
+        return uploadPromise;
 
     } catch (error) {
         console.error('ERROR exporting PDF:', error);

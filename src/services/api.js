@@ -143,6 +143,17 @@ export const settingsService = {
     update: (settingsData) => api.patch('/settings', settingsData),
 };
 
+export const reportService = {
+    list: (patientId) => api.get('/reports', { params: patientId ? { patientId } : {} }),
+    upload: (formData, onUploadProgress) => api.post('/reports', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress,
+    }),
+    delete: (id) => api.delete(`/reports/${id}`),
+    // Build a direct download URL (token in query string so anchor tags work)
+    downloadUrl: (id) => `${API_URL}/reports/${id}/download?token=${localStorage.getItem('token') || ''}`,
+};
+
 // Separate axios instance for admin (uses adminToken)
 const adminApi = axios.create({
     baseURL: API_URL,

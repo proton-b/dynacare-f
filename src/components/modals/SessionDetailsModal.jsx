@@ -241,7 +241,10 @@ const SessionDetailsModal = ({ isOpen, onClose, session }) => {
                                                 treatmentPlan: aiSummary.treatmentPlan || { recommendations: [], followUp: 'N/A' },
                                                 nextSteps: aiSummary.nextSteps || []
                                             };
-                                            exportClinicalSummaryToPDF(summaryForPdf, session.patient_name || 'Patient');
+                                            exportClinicalSummaryToPDF(summaryForPdf, session.patient_name || 'Patient', null, {
+                                                patientId: session.patient_id,
+                                                sessionId: session.session_id || session.id,
+                                            });
                                         } else {
                                             alert("No AI insights available for this session to export.");
                                         }

@@ -408,6 +408,25 @@ const SessionRecording = () => {
             setHarrisonSummary(summaryResponse.data.harrisonSummary || null);
             setActiveReportTab(summaryResponse.data.summary ? 'dsm5' : 'harrison');
             setShowSummaryModal(true);
+
+            // Auto-save the generated report as a PDF in "Previous Reports" — background upload, no local download
+            try {
+              const patientData = patients.find(p => p.id === parseInt(selectedPatient));
+              const patientName = patientData?.full_name || 'Patient';
+              exportClinicalSummaryToPDF(
+                summaryResponse.data.summary,
+                patientName,
+                summaryResponse.data.harrisonSummary || null,
+                {
+                  patientId: selectedPatient,
+                  sessionId: currentSessionId || (response?.data?.id),
+                  title: `Clinical Summary — ${new Date().toLocaleDateString()}`,
+                  skipLocalSave: true,
+                }
+              );
+            } catch (autoSaveErr) {
+              console.warn('Auto-save of generated report failed:', autoSaveErr);
+            }
           } else {
             throw new Error('Summary generation failed: ' + (summaryResponse.data?.message || 'Unknown error'));
           }
@@ -560,6 +579,25 @@ const SessionRecording = () => {
             }
 
             setShowSummaryModal(true)
+
+            // Auto-save the generated report as a PDF in "Previous Reports" — background upload, no local download
+            try {
+              const patientData = patients.find(p => p.id === parseInt(selectedPatient))
+              const patientName = patientData?.full_name || 'Patient'
+              exportClinicalSummaryToPDF(
+                summaryResponse.data.summary,
+                patientName,
+                summaryResponse.data.harrisonSummary || null,
+                {
+                  patientId: selectedPatient,
+                  sessionId: sessionId || recordingId,
+                  title: `Clinical Summary — ${new Date().toLocaleDateString()}`,
+                  skipLocalSave: true,
+                }
+              )
+            } catch (autoSaveErr) {
+              console.warn('Auto-save of generated report failed:', autoSaveErr)
+            }
           } else {
             throw new Error('Summary generation failed: ' + (summaryResponse.data?.message || 'Unknown error'))
           }
@@ -1538,7 +1576,9 @@ const SessionRecording = () => {
                   onClick={() => {
                     const selectedPatientData = patients.find(p => p.id === parseInt(selectedPatient));
                     const patientName = selectedPatientData?.full_name || 'Patient';
-                    exportClinicalSummaryToPDF(clinicalSummary, patientName, harrisonSummary);
+                    exportClinicalSummaryToPDF(clinicalSummary, patientName, harrisonSummary, {
+                      patientId: selectedPatientData?.id,
+                    });
                   }}
                   className="px-6 py-3 bg-white border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50 font-bold rounded-xl transition-all flex items-center space-x-2"
                 >
