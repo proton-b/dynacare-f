@@ -1323,11 +1323,7 @@ const SessionNotes = () => {
             }
         }
 
-        const textContent = content?.replace(/<[^>]*>/g, '') || ''
-        if (!textContent.trim()) {
-            alert('The selected note has no content to export.')
-            return
-        }
+        content = content || ''
 
         const dateStr = noteDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
         const timeStr = noteDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
@@ -1701,16 +1697,6 @@ const SessionNotes = () => {
                                                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                                                     ) : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>}
                                                     <span>{isSymptomReportLoading ? 'Analyzing...' : 'Symptoms Report'}</span>
-                                                </button>
-                                                <button
-                                                    onClick={handleSaveNote}
-                                                    disabled={isSaving}
-                                                    className={`btn-primary text-sm flex items-center space-x-2 ${isSaving ? 'opacity-70 cursor-not-allowed' : ''}`}
-                                                >
-                                                    {isSaving ? (
-                                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                                    ) : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>}
-                                                    <span>{isSaving ? 'Saving...' : editingNoteId ? 'Update' : 'Save'}</span>
                                                 </button>
                                             </div>
                                         </div>
