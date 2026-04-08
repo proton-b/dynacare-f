@@ -20,6 +20,7 @@ jobs:
             cd /root/workspace/dynacare-sec-v2/dynacare-f
             git pull origin master
             npm install
+            npm run build
             pm2 restart 36
 
       - name: Discord Success
