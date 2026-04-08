@@ -5,6 +5,6 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true, // or '0.0.0.0'
-    allowedHosts: ['app2.safentro.com'],
+    allowedHosts: ['app2.safentro.com', 'dynacare.in'],
   },
 })
